@@ -1,0 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Smart City Crowd / CrowdAi palette */
+  --color-header: #5B167D;
+  --color-header-dark: #4a1266;
+  --color-body: #F5F5F7;
+  --color-body-light: #F5F5F7;
+  --color-accent-primary: #5B167D;
+  --color-accent-muted: #6E44A3;
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply antialiased font-sans text-accent-primary;
+  }
+}
