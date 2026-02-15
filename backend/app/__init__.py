@@ -7,8 +7,9 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
     CORS(app, origins=["http://localhost:5173"], supports_credentials=True)
 
-    from app.routes import auth, alerts
+    from app.routes import auth, alerts, location
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(alerts.bp, url_prefix="/api/alerts")
+    app.register_blueprint(location.bp, url_prefix="/api")
 
     return app
