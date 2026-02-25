@@ -3,25 +3,75 @@ from flask import Blueprint, jsonify
 bp = Blueprint("location", __name__)
 
 # Sample data for districts, places, zones (replace with DB later)
+# Updated to use real Tamil Nadu districts to match the frontend mocks.
 DISTRICTS = [
-    {"id": "d1", "name": "Central District", "lat": 13.0827, "lng": 80.2707, "placeCount": 3},
-    {"id": "d2", "name": "North District", "lat": 13.0878, "lng": 80.2085, "placeCount": 2},
-    {"id": "d3", "name": "South District", "lat": 13.0150, "lng": 80.2592, "placeCount": 2},
+    {"id": "d1", "name": "Chennai", "lat": 13.0827, "lng": 80.2707, "placeCount": 3},
+    {"id": "d2", "name": "Salem", "lat": 11.6643, "lng": 78.1460, "placeCount": 2},
+    {"id": "d3", "name": "Coimbatore", "lat": 11.0168, "lng": 76.9558, "placeCount": 2},
 ]
 
 PLACES_BY_DISTRICT = {
     "d1": [
-        {"id": "p1", "districtId": "d1", "name": "Central Railway Station", "type": "railway_station", "lat": 13.0827, "lng": 80.2707},
-        {"id": "p2", "districtId": "d1", "name": "City Bus Stand", "type": "bus_stand", "lat": 13.0819, "lng": 80.2751},
-        {"id": "p3", "districtId": "d1", "name": "Main Market", "type": "market", "lat": 13.0845, "lng": 80.2680},
+        {
+            "id": "p1",
+            "districtId": "d1",
+            "name": "Chennai Central Railway Station",
+            "type": "railway_station",
+            "lat": 13.0827,
+            "lng": 80.2707,
+        },
+        {
+            "id": "p2",
+            "districtId": "d1",
+            "name": "Chennai Mofussil Bus Terminus",
+            "type": "bus_stand",
+            "lat": 13.0820,
+            "lng": 80.2751,
+        },
+        {
+            "id": "p3",
+            "districtId": "d1",
+            "name": "T. Nagar Market",
+            "type": "market",
+            "lat": 13.0358,
+            "lng": 80.2300,
+        },
     ],
     "d2": [
-        {"id": "p4", "districtId": "d2", "name": "North Railway Station", "type": "railway_station", "lat": 13.0878, "lng": 80.2085},
-        {"id": "p5", "districtId": "d2", "name": "Temple Square", "type": "temple", "lat": 13.0900, "lng": 80.2100},
+        {
+            "id": "p4",
+            "districtId": "d2",
+            "name": "Salem Railway Junction",
+            "type": "railway_station",
+            "lat": 11.6643,
+            "lng": 78.1460,
+        },
+        {
+            "id": "p5",
+            "districtId": "d2",
+            "name": "Kottai Mariamman Temple",
+            "type": "temple",
+            "lat": 11.6648,
+            "lng": 78.1450,
+        },
     ],
     "d3": [
-        {"id": "p6", "districtId": "d3", "name": "South Bus Stand", "type": "bus_stand", "lat": 13.0150, "lng": 80.2592},
-        {"id": "p7", "districtId": "d3", "name": "Event Ground", "type": "event_ground", "lat": 13.0180, "lng": 80.2610},
+        {
+            "id": "p6",
+            "districtId": "d3",
+            "name": "Gandhipuram Bus Stand",
+            "type": "bus_stand",
+            "lat": 11.0170,
+            "lng": 76.9660,
+        },
+        {
+            "id": "p7",
+            "districtId": "d3",
+            "name": "Codissia Event Ground",
+            "type": "event_ground",
+            "lat": 11.0290,
+            "lng": 77.0380,
+        },
     ],
 }
 
