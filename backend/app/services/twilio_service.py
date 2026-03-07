@@ -1,5 +1,8 @@
 import os
+import logging
 from twilio.rest import Client
+
+logger = logging.getLogger(__name__)
 
 def get_twilio_client():
     sid = os.getenv("TWILIO_ACCOUNT_SID")
@@ -36,5 +39,6 @@ def send_whatsapp_alert(to_number: str, message: str) -> bool:
     try:
         client.messages.create(body=message, from_=from_number, to=to)
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("WhatsApp alert failed: %s", e)
         return False

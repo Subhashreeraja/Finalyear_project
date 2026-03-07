@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getAdminInfo } from '../lib/adminApi';
 
 const navLinks = [
   { to: '/', label: 'Home' },
@@ -82,6 +83,15 @@ export default function Header() {
                   {link.label}
                 </Link>
               )
+            )}
+            {getAdminInfo() ? (
+              <Link to="/admin/dashboard" className="hover:opacity-90 text-white/90">
+                Admin
+              </Link>
+            ) : (
+              <Link to="/admin/login" className="hover:opacity-90 text-white/80 text-sm">
+                Admin login
+              </Link>
             )}
 
             {/* Profile: icon with "Profile" below */}
