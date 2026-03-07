@@ -6,7 +6,13 @@ from typing import Any, Dict
 import jwt
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from app.models.admin_models import AdminUser, CrowdStatusResponse, OverviewResponse
+from app.models.admin_models import (
+    AdminUser,
+    CrowdStatusResponse,
+    OverviewResponse,
+    PlaceOverview,
+    PlaceType,
+)
 from app.services.camera_service import (
     generate_mjpeg_stream,
     list_cameras,
@@ -17,8 +23,14 @@ from app.services.twilio_service import send_whatsapp_alert
 
 bp = Blueprint("admin", __name__)
 
-
-_gate_status: str = "closed"
+PLACE_TYPES: tuple[PlaceType, ...] = (
+    "railway_station",
+    "mall",
+    "market",
+    "bus_stand",
+    "temple",
+)
+_gate_status_by_place: Dict[str, str] = {pt: "closed" for pt in PLACE_TYPES}
 
 
 def _get_admin_credentials() -> tuple[str, str]:
@@ -97,19 +109,36 @@ def overview():
     cams = list(list_cameras())
     active = 0
     total_count = 0
+    # Per-place stats: place_type -> (total_cameras, active, crowd_count)
+    by_place: Dict[str, tuple[int, int, int]] = {pt: (0, 0, 0) for pt in PLACE_TYPES}
     for cam in cams:
         state = get_camera_state(cam.id)
-        if state.get("active"):
+        is_active = bool(state.get("active"))
+        count = int(state.get("people_count", 0) or 0)
+        if is_active:
             active += 1
-        total_count += int(state.get("people_count", 0) or 0)
+        total_count += count
+        tc, ac, cc = by_place.get(cam.place_type, (0, 0, 0))
+        by_place[cam.place_type] = (tc + 1, ac + (1 if is_active else 0), cc + count)
 
     overcrowded = total_count > int(os.getenv("CROWD_THRESHOLD", "80"))
+    places = [
+        PlaceOverview(
+            place_type=pt,
+            total_cameras=by_place[pt][0],
+            active_cameras=by_place[pt][1],
+            total_crowd_count=by_place[pt][2],
+            gate_status=_gate_status_by_place.get(pt, "closed"),  # type: ignore[arg-type]
+        )
+        for pt in PLACE_TYPES
+    ]
     resp = OverviewResponse(
         total_cameras=len(cams),
         active_cameras=active,
         total_crowd_count=total_count,
         overcrowded=overcrowded,
-        gate_status=_gate_status,  # type: ignore[arg-type]
+        gate_status="open",  # legacy; use per-place
+        places=places,
     )
     return jsonify(
         {
@@ -118,6 +147,16 @@ def overview():
             "totalCrowdCount": resp.total_crowd_count,
             "overcrowded": resp.overcrowded,
             "gateStatus": resp.gate_status.capitalize(),
+            "places": [
+                {
+                    "placeType": p.place_type,
+                    "totalCameras": p.total_cameras,
+                    "activeCameras": p.active_cameras,
+                    "totalCrowdCount": p.total_crowd_count,
+                    "gateStatus": p.gate_status.capitalize(),
+                }
+                for p in resp.places
+            ],
         }
     )
 
@@ -126,7 +165,7 @@ def overview():
 @admin_required
 def cameras():
     items = [
-        {"id": cam.id, "name": cam.name, "video": cam.video}
+        {"id": cam.id, "name": cam.name, "video": cam.video, "placeType": cam.place_type}
         for cam in list_cameras()
     ]
     return jsonify(items)
@@ -172,6 +211,7 @@ def crowd_status():
                     "name": s.name,
                     "peopleCount": s.people_count,
                     "status": s.status,
+                    "placeType": s.place_type,
                 }
                 for s in resp.cameras
             ],
@@ -189,11 +229,14 @@ def crowd_status():
 @bp.route("/gate-control", methods=["POST"])
 @admin_required
 def gate_control():
-    global _gate_status
+    global _gate_status_by_place
     data = request.get_json() or {}
+    place_type = (data.get("placeType") or data.get("place_type") or "").strip()
     action = (data.get("action") or "").strip().lower()
+    if place_type not in PLACE_TYPES:
+        return jsonify({"error": "Invalid placeType. Use railway_station, mall, market, bus_stand, or temple."}), 400
     if action not in ("open", "close"):
         return jsonify({"error": "Invalid action. Use 'open' or 'close'."}), 400
-    _gate_status = "open" if action == "open" else "closed"
-    return jsonify({"gateStatus": _gate_status.capitalize()})
+    _gate_status_by_place[place_type] = "open" if action == "open" else "closed"
+    return jsonify({"placeType": place_type, "gateStatus": _gate_status_by_place[place_type].capitalize()})
 

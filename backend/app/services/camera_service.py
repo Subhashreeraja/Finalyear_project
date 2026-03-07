@@ -12,24 +12,33 @@ BASE_DIR = os.path.abspath(
 )
 
 
-CAMERA_DEFINITIONS = [
-    (1, "Entry Gate", "entry.mp4"),
-    (2, "Exit Gate", "exit.mp4"),
-    (3, "Railway Entry", "railentry.mp4"),
-    (4, "Bus Stop", "stop.mp4"),
-    (5, "Waiting Area", "wait.mp4"),
+# Cameras per place type: Railway 7, Mall 4, Market 5, Bus Stand 5, Temple 5
+# (place_label, place_type, count, video_file)
+PLACE_CAMERA_SPECS = [
+    ("Railway", "railway_station", 7, "exit.mp4"),
+    ("Mall", "mall", 4, "wait.mp4"),
+    ("Market", "market", 5, "stop.mp4"),
+    ("Bus Stand", "bus_stand", 5, "entry.mp4"),
+    ("Temple", "temple", 5, "railentry.mp4"),
 ]
 
+_cam_list: list[Camera] = []
+_camera_id = 1
+for place_label, place_type, count, video in PLACE_CAMERA_SPECS:
+    video_path = os.path.join(BASE_DIR, video)
+    for i in range(1, count + 1):
+        _cam_list.append(
+            Camera(
+                _camera_id,
+                f"{place_label} {i}",
+                video,
+                video_path,
+                place_type,
+            )
+        )
+        _camera_id += 1
 
-CAMERAS = [
-    Camera(
-        id=cid,
-        name=name,
-        video=video,
-        path=os.path.join(BASE_DIR, video),
-    )
-    for cid, name, video in CAMERA_DEFINITIONS
-]
+CAMERAS = _cam_list
 
 
 _camera_state: Dict[int, Dict[str, int | bool]] = {
@@ -141,6 +150,7 @@ def summarize_crowd() -> Tuple[list[CameraCrowdStatus], int, CrowdStatusLevel]:
                 name=cam.name,
                 people_count=count,
                 status=level,
+                place_type=cam.place_type,
             )
         )
 

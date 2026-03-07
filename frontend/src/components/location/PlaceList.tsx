@@ -2,10 +2,11 @@ import { useState, useMemo } from 'react';
 import type { Place } from '../../types/location';
 
 const TYPE_LABELS: Record<Place['type'], string> = {
-  railway_station: 'Railway Station',
+  railway_station: 'Railway',
   bus_stand: 'Bus Stand',
   temple: 'Temple',
   market: 'Market',
+  mall: 'Mall',
   event_ground: 'Event Ground',
   other: 'Other',
 };

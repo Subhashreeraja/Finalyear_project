@@ -17,10 +17,11 @@ interface PlaceCrowdSummary {
 }
 
 const PLACE_TYPE_LABELS: Record<PlaceType, string> = {
-  railway_station: 'Railway Station',
+  railway_station: 'Railway',
   bus_stand: 'Bus Stand',
   temple: 'Temple',
   market: 'Market',
+  mall: 'Mall',
   event_ground: 'Event Ground',
   other: 'Other',
 };

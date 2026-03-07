@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
 import AdminLayout from '../../components/admin/AdminLayout';
-import type { AdminOverview } from '../../lib/adminApi';
+import type { AdminOverview, PlaceType } from '../../lib/adminApi';
 import { fetchAdminOverview, updateGate } from '../../lib/adminApi';
+
+const PLACE_LABELS: Record<PlaceType, string> = {
+  railway_station: 'Railway',
+  mall: 'Mall',
+  market: 'Market',
+  bus_stand: 'Bus Stand',
+  temple: 'Temple',
+};
 
 export default function AdminGateControlPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [updating, setUpdating] = useState(false);
+  const [updatingPlace, setUpdatingPlace] = useState<PlaceType | null>(null);
 
   const load = async () => {
     try {
@@ -25,61 +33,79 @@ export default function AdminGateControlPage() {
     load();
   }, []);
 
-  const handleGate = async (action: 'open' | 'close') => {
-    setUpdating(true);
+  const handleGate = async (placeType: PlaceType, action: 'open' | 'close') => {
+    setUpdatingPlace(placeType);
     try {
-      const res = await updateGate(action);
-      setOverview((prev) => (prev ? { ...prev, gateStatus: res.gateStatus } : prev));
+      const res = await updateGate(placeType, action);
+      setOverview((prev) => {
+        if (!prev?.places) return prev;
+        return {
+          ...prev,
+          places: prev.places.map((p) =>
+            p.placeType === res.placeType ? { ...p, gateStatus: res.gateStatus } : p,
+          ),
+        };
+      });
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to update gate');
     } finally {
-      setUpdating(false);
+      setUpdatingPlace(null);
     }
   };
-
-  const isOpen = overview?.gateStatus === 'Open';
 
   return (
     <AdminLayout>
       <h1 className="text-2xl font-semibold text-accent-primary">Gate Control</h1>
       <p className="mt-1 text-sm text-accent-muted">
-        Remotely open or close gates based on live crowd status.
+        Separate gate control for each place. Open or close gates by place type.
       </p>
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
       {loading && !overview && <p className="mt-4 text-sm text-accent-muted">Loading...</p>}
 
-      {overview && (
-        <div className="mt-6 max-w-xl bg-white rounded-xl shadow-md border border-accent-primary/30 p-6">
-          <p className="text-sm font-medium text-accent-primary">Current Gate Status</p>
-          <p className={`mt-2 text-lg font-semibold ${isOpen ? 'text-green-700' : 'text-red-700'}`}>
-            {overview.gateStatus}
-          </p>
-          <p className="mt-2 text-xs text-accent-muted">
-            Total cameras: {overview.totalCameras} • Active: {overview.activeCameras} • Crowd:{' '}
-            {overview.totalCrowdCount}
-          </p>
-          <div className="mt-6 flex gap-3">
-            <button
-              type="button"
-              disabled={updating || isOpen}
-              onClick={() => handleGate('open')}
-              className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
-            >
-              Open Gate
-            </button>
-            <button
-              type="button"
-              disabled={updating || !isOpen}
-              onClick={() => handleGate('close')}
-              className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
-            >
-              Close Gate
-            </button>
-          </div>
+      {overview?.places && (
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {overview.places.map((place) => {
+            const isOpen = place.gateStatus === 'Open';
+            const busy = updatingPlace === place.placeType;
+            return (
+              <div
+                key={place.placeType}
+                className="bg-white rounded-xl shadow-md border border-accent-primary/30 p-5"
+              >
+                <p className="text-lg font-semibold text-accent-primary">
+                  {PLACE_LABELS[place.placeType]}
+                </p>
+                <p className="mt-1 text-sm text-accent-muted">
+                  Cameras: {place.totalCameras} • Active: {place.activeCameras} • Crowd:{' '}
+                  {place.totalCrowdCount}
+                </p>
+                <p className={`mt-2 text-base font-semibold ${isOpen ? 'text-green-700' : 'text-red-700'}`}>
+                  Gate: {place.gateStatus}
+                </p>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busy || isOpen}
+                    onClick={() => handleGate(place.placeType, 'open')}
+                    className="flex-1 py-2 rounded-md text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+                  >
+                    Open Gate
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !isOpen}
+                    onClick={() => handleGate(place.placeType, 'close')}
+                    className="flex-1 py-2 rounded-md text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+                  >
+                    Close Gate
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </AdminLayout>
   );
 }
-

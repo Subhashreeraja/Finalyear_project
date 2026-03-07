@@ -12,12 +12,16 @@ class AdminUser:
     role: Role = "admin"
 
 
+PlaceType = Literal["railway_station", "mall", "market", "bus_stand", "temple"]
+
+
 @dataclass
 class Camera:
     id: int
     name: str
     video: str
     path: str
+    place_type: PlaceType
 
 
 CrowdStatusLevel = Literal["Safe", "Warning", "Overcrowded"]
@@ -29,6 +33,16 @@ class CameraCrowdStatus:
     name: str
     people_count: int
     status: CrowdStatusLevel
+    place_type: PlaceType
+
+
+@dataclass
+class PlaceOverview:
+    place_type: PlaceType
+    total_cameras: int
+    active_cameras: int
+    total_crowd_count: int
+    gate_status: Literal["open", "closed"]
 
 
 @dataclass
@@ -38,6 +52,7 @@ class OverviewResponse:
     total_crowd_count: int
     overcrowded: bool
     gate_status: Literal["open", "closed"]
+    places: List[PlaceOverview]
 
 
 @dataclass

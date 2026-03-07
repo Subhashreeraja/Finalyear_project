@@ -13,7 +13,7 @@ export interface Place {
   id: string;
   districtId: string;
   name: string;
-  type: 'railway_station' | 'bus_stand' | 'temple' | 'market' | 'event_ground' | 'other';
+  type: 'railway_station' | 'bus_stand' | 'temple' | 'market' | 'mall' | 'event_ground' | 'other';
   lat: number;
   lng: number;
   address?: string;

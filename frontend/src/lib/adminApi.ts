@@ -9,18 +9,30 @@ export interface AdminLoginResponse {
   admin: AdminInfo;
 }
 
+export interface PlaceOverview {
+  placeType: PlaceType;
+  totalCameras: number;
+  activeCameras: number;
+  totalCrowdCount: number;
+  gateStatus: 'Open' | 'Closed';
+}
+
 export interface AdminOverview {
   totalCameras: number;
   activeCameras: number;
   totalCrowdCount: number;
   overcrowded: boolean;
   gateStatus: 'Open' | 'Closed';
+  places: PlaceOverview[];
 }
+
+export type PlaceType = 'railway_station' | 'mall' | 'market' | 'bus_stand' | 'temple';
 
 export interface AdminCamera {
   id: number;
   name: string;
   video: string;
+  placeType: PlaceType;
 }
 
 export type CrowdStatusLevel = 'Safe' | 'Warning' | 'Overcrowded';
@@ -30,6 +42,7 @@ export interface CameraCrowdStatus {
   name: string;
   peopleCount: number;
   status: CrowdStatusLevel;
+  placeType: PlaceType;
 }
 
 export interface CrowdStatusResponse {
@@ -126,10 +139,13 @@ export async function fetchCrowdStatus(): Promise<CrowdStatusResponse> {
   return apiFetch<CrowdStatusResponse>('/crowd-status');
 }
 
-export async function updateGate(action: 'open' | 'close'): Promise<{ gateStatus: 'Open' | 'Closed' }> {
-  return apiFetch<{ gateStatus: 'Open' | 'Closed' }>('/gate-control', {
+export async function updateGate(
+  placeType: PlaceType,
+  action: 'open' | 'close',
+): Promise<{ placeType: PlaceType; gateStatus: 'Open' | 'Closed' }> {
+  return apiFetch<{ placeType: PlaceType; gateStatus: 'Open' | 'Closed' }>('/gate-control', {
     method: 'POST',
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ placeType, action }),
   });
 }
 

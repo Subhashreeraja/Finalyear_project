@@ -4,12 +4,20 @@ import type {
   AdminCamera,
   CameraCrowdStatus,
   CrowdStatusResponse,
+  PlaceType,
 } from "../../lib/adminApi";
 import {
   fetchAdminCameras,
   fetchCrowdStatus,
 } from "../../lib/adminApi";
 
+const PLACE_OPTIONS: { value: PlaceType; label: string }[] = [
+  { value: "railway_station", label: "Railway" },
+  { value: "mall", label: "Mall" },
+  { value: "market", label: "Market" },
+  { value: "bus_stand", label: "Bus Stand" },
+  { value: "temple", label: "Temple" },
+];
 
 function badgeColor(status: CameraCrowdStatus["status"]) {
   if (status === "Safe") return "bg-green-100 text-green-700";
@@ -22,6 +30,7 @@ export default function AdminCamerasPage() {
   const [crowd, setCrowd] = useState<CrowdStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPlace, setSelectedPlace] = useState<PlaceType | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -59,6 +68,10 @@ export default function AdminCamerasPage() {
   const cameraStatusMap = new Map<number, CameraCrowdStatus>();
   crowd?.cameras.forEach((c) => cameraStatusMap.set(c.id, c));
 
+  const filteredCameras = selectedPlace
+    ? cameras.filter((cam) => cam.placeType === selectedPlace)
+    : [];
+
   return (
     <AdminLayout>
       <h1 className="text-2xl font-semibold text-accent-primary">
@@ -66,21 +79,42 @@ export default function AdminCamerasPage() {
       </h1>
 
       <p className="mt-1 text-sm text-accent-muted">
-        Live video streams with real-time people counts per camera.
+        Select a place type to view its cameras. Live streams with real-time people counts.
       </p>
 
       {error && (
         <p className="mt-4 text-sm text-red-600">{error}</p>
       )}
 
+      <div className="mt-6 flex flex-wrap gap-2">
+        <span className="text-sm font-medium text-accent-muted self-center mr-1">Place:</span>
+        {PLACE_OPTIONS.map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setSelectedPlace(value)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              selectedPlace === value
+                ? "bg-accent-primary text-white shadow-md"
+                : "bg-white border border-accent-primary/40 text-accent-primary hover:bg-accent-primary/10"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {loading && !cameras.length && (
-        <p className="mt-4 text-sm text-accent-muted">
-          Loading...
-        </p>
+        <p className="mt-4 text-sm text-accent-muted">Loading...</p>
       )}
 
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {cameras.map((cam) => {
+      {!loading && cameras.length > 0 && !selectedPlace && (
+        <p className="mt-6 text-accent-muted">Select a place above to view its cameras.</p>
+      )}
+
+      {selectedPlace && (
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {filteredCameras.map((cam) => {
           const status = cameraStatusMap.get(cam.id);
 
           return (
@@ -128,7 +162,8 @@ export default function AdminCamerasPage() {
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </AdminLayout>
   );
 }
