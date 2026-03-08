@@ -1,45 +1,125 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
-import { fetchPlace, fetchZonesByPlace, fetchZoneStatus } from '../../lib/locationApi';
-import { canViewVideo, canTriggerAlerts } from '../../lib/roles';
-import type { Place, Zone, ZoneStatus } from '../../types/location';
-import ZoneMapOverlay from '../../components/location/ZoneMapOverlay';
-import CrowdStatusLegend from '../../components/location/CrowdStatusLegend';
+import { fetchPlace, fetchPlaceStatus } from '../../lib/locationApi';
+import type { Place } from '../../types/location';
+import type { PlaceCameraStatus } from '../../lib/locationApi';
 
-const CROWD_LABELS = { low: 'Low', moderate: 'Moderate', high: 'High' } as const;
-const CROWD_BG = { low: 'bg-green-100 text-green-800', moderate: 'bg-yellow-100 text-yellow-800', high: 'bg-red-100 text-red-800' } as const;
+const PLACE_TYPE_LABELS: Record<Place['type'], string> = {
+  railway_station: 'Railway',
+  bus_stand: 'Bus Stand',
+  temple: 'Temple',
+  market: 'Market',
+  mall: 'Mall',
+};
+
+const STATUS_LABELS = { Safe: 'Safe', Warning: 'Warning', Overcrowded: 'Overcrowded' } as const;
+const STATUS_BG = {
+  Safe: 'bg-green-100 text-green-800',
+  Warning: 'bg-yellow-100 text-yellow-800',
+  Overcrowded: 'bg-red-100 text-red-800',
+} as const;
+
+interface PlaceAlert {
+  id: string;
+  type: 'overcrowded' | 'warning' | 'info';
+  message: string;
+}
+
+function deriveAlerts(
+  cameras: PlaceCameraStatus[],
+  totalCount: number,
+  threshold: number,
+): PlaceAlert[] {
+  const alerts: PlaceAlert[] = [];
+  for (const cam of cameras) {
+    if (cam.status === 'Overcrowded') {
+      alerts.push({
+        id: `overcrowded-${cam.id}`,
+        type: 'overcrowded',
+        message: `${cam.name} is overcrowded (${cam.peopleCount} people detected). Consider visiting later.`,
+      });
+    } else if (cam.status === 'Warning') {
+      alerts.push({
+        id: `warning-${cam.id}`,
+        type: 'warning',
+        message: `${cam.name} has elevated crowd (${cam.peopleCount} people).`,
+      });
+    }
+  }
+  if (totalCount > threshold) {
+    alerts.push({
+      id: 'threshold',
+      type: 'overcrowded',
+      message: `Overall crowd (${totalCount}) exceeds threshold (${threshold}). Alert triggered.`,
+    });
+  }
+  return alerts;
+}
 
 export default function LocationPlacePage() {
   const { placeId } = useParams<{ placeId: string }>();
-  const { user } = useAuth();
   const [place, setPlace] = useState<Place | null>(null);
-  const [zones, setZones] = useState<Zone[]>([]);
-  const [status, setStatus] = useState<ZoneStatus[]>([]);
+  const [placeStatus, setPlaceStatus] = useState<Awaited<ReturnType<typeof fetchPlaceStatus>> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!placeId) return;
-    Promise.all([fetchPlace(placeId), fetchZonesByPlace(placeId), fetchZoneStatus(placeId)])
-      .then(([p, zoneList, statusList]) => {
-        setPlace(p ?? null);
-        setZones(zoneList);
-        setStatus(statusList);
-      })
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const load = () =>
+      Promise.all([fetchPlace(placeId), fetchPlaceStatus(placeId)])
+        .then(([p, status]) => {
+          if (cancelled) return;
+          setPlace(p ?? null);
+          setPlaceStatus(status);
+          setError(null);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err.message || 'Failed to load place status');
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    load();
+    const interval = setInterval(load, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [placeId]);
 
-  const placeCenter: [number, number] = place ? [place.lat, place.lng] : [13.0827, 80.2707];
+  const alerts = useMemo(
+    () =>
+      placeStatus
+        ? deriveAlerts(
+            placeStatus.cameras,
+            placeStatus.totalCount,
+            placeStatus.alert.threshold,
+          )
+        : [],
+    [placeStatus],
+  );
 
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <p className="text-accent-muted">Loading zone status...</p>
+        <p className="text-accent-muted">Loading place status...</p>
       </div>
     );
   }
 
-  const showAdmin = user && (canViewVideo(user.role) || canTriggerAlerts(user.role));
+  if (error || !place || !placeStatus) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <p className="text-red-600">{error || 'Place not found'}</p>
+        <Link to="/location" className="mt-4 inline-block text-header hover:underline">
+          Back to map
+        </Link>
+      </div>
+    );
+  }
+
+  const statusKey = placeStatus.status as keyof typeof STATUS_BG;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
@@ -48,65 +128,94 @@ export default function LocationPlacePage() {
           Location
         </Link>
         <span className="text-gray-400">/</span>
-        <span className="text-accent-muted">{place?.name ?? 'Place'}</span>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-accent-primary">Zone-based crowd view</h1>
-          <p className="text-accent-muted mt-1">{place?.name ?? placeId}</p>
-        </div>
-        <CrowdStatusLegend />
+        <span className="text-accent-muted">{place.name}</span>
       </div>
 
-      <div className="grid lg:grid-cols-5 gap-6">
-        <div className="lg:col-span-3">
-          <ZoneMapOverlay zones={zones} placeCenter={placeCenter} placeName={place?.name ?? ''} />
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-accent-primary">{place.name}</h1>
+          <p className="text-accent-muted mt-1">
+            {PLACE_TYPE_LABELS[place.type]} · {placeStatus.cameras.length} cameras · Status & alerts
+          </p>
         </div>
-        <div className="lg:col-span-2 space-y-4">
-          <h2 className="text-lg font-semibold text-accent-primary">Zone status</h2>
-          <ul className="space-y-3">
-            {(status.length ? status : zones.map((z) => ({
-              zoneId: z.id,
-              zoneName: z.name,
-              crowdLevel: z.crowdLevel,
-              crowdCount: z.crowdCount ?? 0,
-              capacity: z.capacity ?? 500,
-              updatedAt: '',
-            }))).map((s) => (
-              <li key={s.zoneId} className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
-                <div className="flex justify-between items-start">
-                  <span className="font-medium">{s.zoneName}</span>
-                  <span className={`px-2 py-0.5 rounded text-sm font-medium ${CROWD_BG[s.crowdLevel]}`}>
-                    {CROWD_LABELS[s.crowdLevel]}
-                  </span>
-                </div>
-                <p className="text-sm text-accent-muted mt-1">
-                  {s.crowdCount} / {s.capacity} people
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Camera status */}
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-xl shadow-md border border-accent-primary/30 p-5">
+            <h2 className="text-lg font-semibold text-accent-primary mb-4">Camera status</h2>
+            <div className="flex flex-wrap items-center gap-4 mb-4">
+              <div>
+                <p className="text-xs text-accent-muted uppercase tracking-wide">Overall status</p>
+                <span
+                  className={`inline-flex mt-1 px-3 py-1 rounded-full text-sm font-semibold ${STATUS_BG[statusKey]}`}
+                >
+                  {STATUS_LABELS[placeStatus.status]}
+                </span>
+              </div>
+              <div>
+                <p className="text-xs text-accent-muted uppercase tracking-wide">Total people</p>
+                <p className="mt-1 font-semibold text-accent-primary">
+                  {placeStatus.totalCount.toLocaleString()}
                 </p>
-              </li>
-            ))}
-          </ul>
-          {showAdmin && (
-            <div className="pt-4 border-t border-gray-200 space-y-2">
-              <p className="text-sm font-medium text-accent-primary">Admin</p>
-              {canViewVideo(user!.role) && (
-                <Link
-                  to={`/dashboard?video=place-${placeId}`}
-                  className="block w-full py-2 px-4 bg-header/10 text-header rounded-lg hover:bg-header/20 text-sm font-medium"
-                >
-                  View live video feed
-                </Link>
-              )}
-              {canTriggerAlerts(user!.role) && (
-                <button
-                  type="button"
-                  className="w-full py-2 px-4 border border-header text-header rounded-lg hover:bg-header/10 text-sm font-medium"
-                >
-                  Trigger alert / Restrict zone
-                </button>
-              )}
+              </div>
+              <div>
+                <p className="text-xs text-accent-muted uppercase tracking-wide">Cameras</p>
+                <p className="mt-1 font-semibold text-accent-primary">{placeStatus.cameras.length}</p>
+              </div>
             </div>
-          )}
+            <h3 className="text-sm font-medium text-accent-primary mt-4 mb-2">
+              Per-camera status ({placeStatus.cameras.length} cameras)
+            </h3>
+            <ul className="space-y-3">
+              {placeStatus.cameras.map((cam) => (
+                <li
+                  key={cam.id}
+                  className="flex justify-between items-center p-3 bg-body-light rounded-lg border border-accent-muted/20"
+                >
+                  <span className="font-medium">{cam.name}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-sm font-medium ${
+                      STATUS_BG[cam.status as keyof typeof STATUS_BG]
+                    }`}
+                  >
+                    {STATUS_LABELS[cam.status]}
+                  </span>
+                  <span className="text-sm text-accent-muted">{cam.peopleCount} people</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* Alerts */}
+        <div>
+          <div className="bg-white rounded-xl shadow-md border border-accent-primary/30 p-5">
+            <h2 className="text-lg font-semibold text-accent-primary mb-4">Alerts & information</h2>
+            {alerts.length === 0 ? (
+              <p className="text-sm text-accent-muted">
+                No active alerts. Crowd levels are within normal range.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {alerts.map((a) => (
+                  <li
+                    key={a.id}
+                    className={`p-3 rounded-lg border ${
+                      a.type === 'overcrowded'
+                        ? 'bg-red-50 border-red-200 text-red-800'
+                        : a.type === 'warning'
+                          ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
+                          : 'bg-blue-50 border-blue-200 text-blue-800'
+                    }`}
+                  >
+                    <p className="text-sm font-medium">{a.message}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
     </div>

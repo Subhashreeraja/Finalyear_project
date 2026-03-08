@@ -60,7 +60,7 @@ export default function LocationDistrictPage() {
         <span className="font-semibold text-accent-primary">{district.name}</span>
       </div>
       <h1 className="text-2xl font-bold text-accent-primary mb-2">Public places</h1>
-      <p className="text-accent-muted mb-6">Select a place to view zone-wise crowd status.</p>
+      <p className="text-accent-muted mb-6">Select a place to view camera status and alerts.</p>
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="flex flex-col gap-4">
@@ -72,7 +72,7 @@ export default function LocationDistrictPage() {
               onClick={handleViewZones}
               className="mt-2 w-full py-3 px-4 bg-header text-white font-medium rounded-lg hover:bg-header-dark transition-colors"
             >
-              View zone status at {selected.name}
+              View status & alerts at {selected.name}
             </button>
           )}
         </div>

@@ -7,8 +7,6 @@ const TYPE_LABELS: Record<Place['type'], string> = {
   temple: 'Temple',
   market: 'Market',
   mall: 'Mall',
-  event_ground: 'Event Ground',
-  other: 'Other',
 };
 
 interface PlaceListProps {

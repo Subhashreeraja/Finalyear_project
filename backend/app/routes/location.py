@@ -1,3 +1,4 @@
+import os
 from flask import Blueprint, jsonify
 
 bp = Blueprint("location", __name__)
@@ -85,3 +86,56 @@ def zone_status(place_id):
         for z in zones
     ]
     return jsonify(status)
+
+
+@bp.route("/crowd-by-place-type", methods=["GET"])
+def crowd_by_place_type():
+    """Public API: returns real crowd totals and status per place type (from camera service)."""
+    from app.services.camera_service import compute_crowd_status, summarize_crowd
+    statuses, _, _ = summarize_crowd()
+    threshold = int(os.getenv("CROWD_THRESHOLD", "80"))
+    result = {}
+    for pt in ("railway_station", "mall", "market", "bus_stand", "temple"):
+        cams = [s for s in statuses if s.place_type == pt]
+        total = sum(s.people_count for s in cams)
+        level = compute_crowd_status(total)
+        result[pt] = {
+            "totalCount": total,
+            "status": level,
+            "cameraCount": len(cams),
+            "alertTriggered": total > threshold,
+        }
+    return jsonify(result)
+
+
+@bp.route("/places/<place_id>/status", methods=["GET"])
+def place_status(place_id):
+    """Public API: returns real camera status and alerts for this place's type (from admin/camera service)."""
+    p = get_place_by_id(place_id)
+    if not p:
+        return jsonify({"error": "Place not found"}), 404
+    place_type = p.get("type")
+    if not place_type:
+        return jsonify({"error": "Place has no type"}), 400
+
+    from app.services.camera_service import compute_crowd_status, summarize_crowd
+    statuses, _, _ = summarize_crowd()
+    threshold = int(os.getenv("CROWD_THRESHOLD", "80"))
+    cameras_for_place = [s for s in statuses if s.place_type == place_type]
+    total_for_place = sum(s.people_count for s in cameras_for_place)
+    alert_triggered = total_for_place > threshold
+    place_status_level = compute_crowd_status(total_for_place)
+
+    return jsonify({
+        "place": p,
+        "cameras": [
+            {"id": s.id, "name": s.name, "peopleCount": s.people_count, "status": s.status}
+            for s in cameras_for_place
+        ],
+        "totalCount": total_for_place,
+        "status": place_status_level,
+        "alert": {
+            "threshold": threshold,
+            "alertTriggered": alert_triggered,
+        },
+    })
