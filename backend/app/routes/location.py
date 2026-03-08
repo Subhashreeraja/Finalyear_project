@@ -1,77 +1,37 @@
+import os
 from flask import Blueprint, jsonify
 
 bp = Blueprint("location", __name__)
 
-# Sample data for districts, places, zones (replace with DB later)
-# Updated to use real Tamil Nadu districts to match the frontend mocks.
+# Sample data for districts, places, zones (replace with DB later).
+# Five place types: bus_stand, railway_station, temple, market, mall.
 DISTRICTS = [
-    {"id": "d1", "name": "Chennai", "lat": 13.0827, "lng": 80.2707, "placeCount": 3},
-    {"id": "d2", "name": "Salem", "lat": 11.6643, "lng": 78.1460, "placeCount": 2},
-    {"id": "d3", "name": "Coimbatore", "lat": 11.0168, "lng": 76.9558, "placeCount": 2},
+    {"id": "d1", "name": "Chennai", "lat": 13.0827, "lng": 80.2707, "placeCount": 5},
+    {"id": "d2", "name": "Salem", "lat": 11.6643, "lng": 78.1460, "placeCount": 5},
+    {"id": "d3", "name": "Coimbatore", "lat": 11.0168, "lng": 76.9558, "placeCount": 5},
 ]
 
 PLACES_BY_DISTRICT = {
     "d1": [
-        {
-            "id": "p1",
-            "districtId": "d1",
-            "name": "Chennai Central Railway Station",
-            "type": "railway_station",
-            "lat": 13.0827,
-            "lng": 80.2707,
-        },
-        {
-            "id": "p2",
-            "districtId": "d1",
-            "name": "Chennai Mofussil Bus Terminus",
-            "type": "bus_stand",
-            "lat": 13.0820,
-            "lng": 80.2751,
-        },
-        {
-            "id": "p3",
-            "districtId": "d1",
-            "name": "T. Nagar Market",
-            "type": "market",
-            "lat": 13.0358,
-            "lng": 80.2300,
-        },
+        {"id": "p1", "districtId": "d1", "name": "Chennai Central Railway Station", "type": "railway_station", "lat": 13.0827, "lng": 80.2707},
+        {"id": "p2", "districtId": "d1", "name": "Chennai Mofussil Bus Terminus", "type": "bus_stand", "lat": 13.0820, "lng": 80.2751},
+        {"id": "p3", "districtId": "d1", "name": "Kapaleeshwarar Temple", "type": "temple", "lat": 13.0356, "lng": 80.2678},
+        {"id": "p4", "districtId": "d1", "name": "T. Nagar Market", "type": "market", "lat": 13.0358, "lng": 80.2300},
+        {"id": "p5", "districtId": "d1", "name": "Phoenix Mall Velachery", "type": "mall", "lat": 12.9850, "lng": 80.2200},
     ],
     "d2": [
-        {
-            "id": "p4",
-            "districtId": "d2",
-            "name": "Salem Railway Junction",
-            "type": "railway_station",
-            "lat": 11.6643,
-            "lng": 78.1460,
-        },
-        {
-            "id": "p5",
-            "districtId": "d2",
-            "name": "Kottai Mariamman Temple",
-            "type": "temple",
-            "lat": 11.6648,
-            "lng": 78.1450,
-        },
+        {"id": "p6", "districtId": "d2", "name": "Salem Railway Junction", "type": "railway_station", "lat": 11.6643, "lng": 78.1460},
+        {"id": "p7", "districtId": "d2", "name": "Salem New Bus Stand", "type": "bus_stand", "lat": 11.6640, "lng": 78.1510},
+        {"id": "p8", "districtId": "d2", "name": "Kottai Mariamman Temple", "type": "temple", "lat": 11.6648, "lng": 78.1450},
+        {"id": "p9", "districtId": "d2", "name": "Salem Old Market", "type": "market", "lat": 11.6580, "lng": 78.1420},
+        {"id": "p10", "districtId": "d2", "name": "Salem City Centre Mall", "type": "mall", "lat": 11.6700, "lng": 78.1480},
     ],
     "d3": [
-        {
-            "id": "p6",
-            "districtId": "d3",
-            "name": "Gandhipuram Bus Stand",
-            "type": "bus_stand",
-            "lat": 11.0170,
-            "lng": 76.9660,
-        },
-        {
-            "id": "p7",
-            "districtId": "d3",
-            "name": "Codissia Event Ground",
-            "type": "event_ground",
-            "lat": 11.0290,
-            "lng": 77.0380,
-        },
+        {"id": "p11", "districtId": "d3", "name": "Coimbatore Junction Railway", "type": "railway_station", "lat": 11.0192, "lng": 76.9665},
+        {"id": "p12", "districtId": "d3", "name": "Gandhipuram Bus Stand", "type": "bus_stand", "lat": 11.0170, "lng": 76.9660},
+        {"id": "p13", "districtId": "d3", "name": "Marudamalai Temple", "type": "temple", "lat": 10.9910, "lng": 76.9320},
+        {"id": "p14", "districtId": "d3", "name": "Gandhipuram Market", "type": "market", "lat": 11.0180, "lng": 76.9680},
+        {"id": "p15", "districtId": "d3", "name": "Brookefields Mall", "type": "mall", "lat": 11.0290, "lng": 77.0380},
     ],
 }
 
@@ -126,3 +86,56 @@ def zone_status(place_id):
         for z in zones
     ]
     return jsonify(status)
+
+
+@bp.route("/crowd-by-place-type", methods=["GET"])
+def crowd_by_place_type():
+    """Public API: returns real crowd totals and status per place type (from camera service)."""
+    from app.services.camera_service import compute_crowd_status, summarize_crowd
+    statuses, _, _ = summarize_crowd()
+    threshold = int(os.getenv("CROWD_THRESHOLD", "80"))
+    result = {}
+    for pt in ("railway_station", "mall", "market", "bus_stand", "temple"):
+        cams = [s for s in statuses if s.place_type == pt]
+        total = sum(s.people_count for s in cams)
+        level = compute_crowd_status(total)
+        result[pt] = {
+            "totalCount": total,
+            "status": level,
+            "cameraCount": len(cams),
+            "alertTriggered": total > threshold,
+        }
+    return jsonify(result)
+
+
+@bp.route("/places/<place_id>/status", methods=["GET"])
+def place_status(place_id):
+    """Public API: returns real camera status and alerts for this place's type (from admin/camera service)."""
+    p = get_place_by_id(place_id)
+    if not p:
+        return jsonify({"error": "Place not found"}), 404
+    place_type = p.get("type")
+    if not place_type:
+        return jsonify({"error": "Place has no type"}), 400
+
+    from app.services.camera_service import compute_crowd_status, summarize_crowd
+    statuses, _, _ = summarize_crowd()
+    threshold = int(os.getenv("CROWD_THRESHOLD", "80"))
+    cameras_for_place = [s for s in statuses if s.place_type == place_type]
+    total_for_place = sum(s.people_count for s in cameras_for_place)
+    alert_triggered = total_for_place > threshold
+    place_status_level = compute_crowd_status(total_for_place)
+
+    return jsonify({
+        "place": p,
+        "cameras": [
+            {"id": s.id, "name": s.name, "peopleCount": s.people_count, "status": s.status}
+            for s in cameras_for_place
+        ],
+        "totalCount": total_for_place,
+        "status": place_status_level,
+        "alert": {
+            "threshold": threshold,
+            "alertTriggered": alert_triggered,
+        },
+    })

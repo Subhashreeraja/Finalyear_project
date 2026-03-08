@@ -3,26 +3,33 @@ import { useNavigate } from 'react-router-dom';
 import { CircleMarker, Popup } from 'react-leaflet';
 import MapContainer from '../../components/location/MapContainer';
 import SetMapView from '../../components/location/SetMapView';
-import { fetchDistricts, fetchPlacesByDistrict, fetchZoneStatus } from '../../lib/locationApi';
-import type { CrowdLevel, District, Place, ZoneStatus } from '../../types/location';
+import { fetchDistricts, fetchPlacesByDistrict, fetchCrowdByPlaceType } from '../../lib/locationApi';
+import type { CrowdLevel, District, Place } from '../../types/location';
 
 const DEFAULT_CENTER: [number, number] = [13.0827, 80.2707];
 
 type PlaceType = Place['type'];
 
+/** Map admin status to map crowd level */
+function adminStatusToLevel(status: string): CrowdLevel {
+  if (status === 'Safe') return 'low';
+  if (status === 'Warning') return 'moderate';
+  return 'high';
+}
+
 interface PlaceCrowdSummary {
   level: CrowdLevel;
-  totalCount: number | null;
-  updatedAt: string | null;
+  totalCount: number;
+  cameraCount: number;
+  alertTriggered: boolean;
 }
 
 const PLACE_TYPE_LABELS: Record<PlaceType, string> = {
-  railway_station: 'Railway Station',
+  railway_station: 'Railway',
   bus_stand: 'Bus Stand',
   temple: 'Temple',
   market: 'Market',
-  event_ground: 'Event Ground',
-  other: 'Other',
+  mall: 'Mall',
 };
 
 const CROWD_COLORS: Record<CrowdLevel, { border: string; fill: string; badge: string; label: string }> = {
@@ -51,7 +58,7 @@ export default function LocationPage() {
 
   const [districts, setDistricts] = useState<District[]>([]);
   const [places, setPlaces] = useState<Place[]>([]);
-  const [placeCrowd, setPlaceCrowd] = useState<Record<string, PlaceCrowdSummary>>({});
+  const [crowdByPlaceType, setCrowdByPlaceType] = useState<Record<PlaceType, PlaceCrowdSummary>>({} as Record<PlaceType, PlaceCrowdSummary>);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState('');
@@ -88,40 +95,30 @@ export default function LocationPage() {
   }, []);
 
   useEffect(() => {
-    if (!places.length) return;
-
     let cancelled = false;
-
-    async function loadCrowd() {
-      const summaries: Record<string, PlaceCrowdSummary> = {};
-
-      const results = await Promise.allSettled(
-        places.map(async (p) => {
-          try {
-            const status = await fetchZoneStatus(p.id);
-            return { placeId: p.id, status };
-          } catch {
-            return { placeId: p.id, status: [] as ZoneStatus[] };
+    const load = () =>
+      fetchCrowdByPlaceType()
+        .then((data) => {
+          if (cancelled) return;
+          const summaries = {} as Record<PlaceType, PlaceCrowdSummary>;
+          for (const [pt, d] of Object.entries(data)) {
+            summaries[pt as PlaceType] = {
+              level: adminStatusToLevel(d.status),
+              totalCount: d.totalCount,
+              cameraCount: d.cameraCount,
+              alertTriggered: d.alertTriggered,
+            };
           }
-        }),
-      );
-
-      if (cancelled) return;
-
-      for (const r of results) {
-        if (r.status !== 'fulfilled') continue;
-        const { placeId, status } = r.value;
-        summaries[placeId] = summarizeCrowdStatus(status);
-      }
-
-      setPlaceCrowd((prev) => ({ ...prev, ...summaries }));
-    }
-
-    loadCrowd();
+          setCrowdByPlaceType(summaries);
+        })
+        .catch(() => {});
+    load();
+    const interval = setInterval(load, 10_000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
-  }, [places]);
+  }, []);
 
   const selectedPlace = useMemo(
     () => places.find((p) => p.id === selectedPlaceId) ?? null,
@@ -184,7 +181,7 @@ export default function LocationPage() {
 
       const matchesType = typeFilter.length ? typeFilter.includes(p.type) : true;
 
-      const summary = placeCrowd[p.id];
+      const summary = crowdByPlaceType[p.type];
       const level = summary?.level;
       const matchesCrowd = crowdFilter.length ? (level ? crowdFilter.includes(level) : false) : true;
 
@@ -199,7 +196,7 @@ export default function LocationPage() {
       if (isSelected) return true;
       return matchesDistrict && matchesType && matchesCrowd && matchesSearch;
     });
-  }, [places, selectedPlaceId, activeDistrictIds, typeFilter, placeCrowd, crowdFilter, districts, searchQuery]);
+  }, [places, selectedPlaceId, activeDistrictIds, typeFilter, crowdByPlaceType, crowdFilter, districts, searchQuery]);
 
   const mapCenter: [number, number] = useMemo(() => {
     if (selectedPlace) return [selectedPlace.lat, selectedPlace.lng];
@@ -307,7 +304,6 @@ export default function LocationPage() {
                 <p className="text-xs font-medium text-accent-primary/80">Place type</p>
                 <div className="flex flex-wrap gap-2">
                   {(Object.entries(PLACE_TYPE_LABELS) as [PlaceType, string][]).map(([type, label]) => {
-                    if (type === 'other') return null;
                     const active = typeFilter.includes(type);
                     return (
                       <button
@@ -360,11 +356,11 @@ export default function LocationPage() {
           </div>
 
           <div className="bg-white/90 backdrop-blur rounded-2xl shadow-md border border-purple-100 p-4 sm:p-5 min-h-[140px]">
-            {selectedPlace ? (
+              {selectedPlace ? (
               <SelectedPlaceInfoCard
                 place={selectedPlace}
                 district={selectedDistrict ?? undefined}
-                summary={placeCrowd[selectedPlace.id]}
+                summary={crowdByPlaceType[selectedPlace.type]}
                 onViewZones={() => handleViewCrowdStatus(selectedPlace.id)}
               />
             ) : (
@@ -383,7 +379,7 @@ export default function LocationPage() {
             <MapContainer center={mapCenter} zoom={mapZoom} className="h-full w-full rounded-2xl">
               <SetMapView center={mapCenter} zoom={mapZoom} />
               {filteredPlaces.map((p) => {
-                const summary = placeCrowd[p.id];
+                const summary = crowdByPlaceType[p.type];
                 const level = summary?.level ?? 'low';
                 const colors = CROWD_COLORS[level];
 
@@ -411,7 +407,7 @@ export default function LocationPage() {
                           onClick={() => handleViewCrowdStatus(p.id)}
                           className="mt-2 w-full text-xs font-semibold text-header hover:underline"
                         >
-                          View crowd status
+                          View status & alerts
                         </button>
                       </div>
                     </Popup>
@@ -424,36 +420,6 @@ export default function LocationPage() {
       </div>
     </div>
   );
-}
-
-function summarizeCrowdStatus(status: ZoneStatus[]): PlaceCrowdSummary {
-  if (!status.length) {
-    return {
-      level: 'low',
-      totalCount: null,
-      updatedAt: null,
-    };
-  }
-
-  const order: CrowdLevel[] = ['low', 'moderate', 'high'];
-  const level = status.reduce<CrowdLevel>((current, s) => {
-    const currentIndex = order.indexOf(current);
-    const nextIndex = order.indexOf(s.crowdLevel);
-    return nextIndex > currentIndex ? s.crowdLevel : current;
-  }, 'low');
-
-  const totalCount = status.reduce((sum, s) => sum + (s.crowdCount ?? 0), 0);
-  const updatedAt = status
-    .map((s) => s.updatedAt)
-    .filter(Boolean)
-    .sort()
-    .at(-1) as string | undefined;
-
-  return {
-    level,
-    totalCount,
-    updatedAt: updatedAt ?? null,
-  };
 }
 
 interface SelectedPlaceInfoCardProps {
@@ -485,15 +451,15 @@ function SelectedPlaceInfoCard({ place, district, summary, onViewZones }: Select
 
       <div className="flex flex-wrap items-center gap-3 text-xs">
         <div className="flex flex-col">
-          <span className="text-accent-muted">Estimated crowd</span>
+          <span className="text-accent-muted">People count</span>
           <span className="font-semibold text-accent-primary">
-            {summary?.totalCount != null ? `${summary.totalCount.toLocaleString()} people` : 'Not available'}
+            {summary ? `${summary.totalCount.toLocaleString()} people` : 'Loading...'}
           </span>
         </div>
         <div className="flex flex-col">
-          <span className="text-accent-muted">Last updated</span>
+          <span className="text-accent-muted">Cameras</span>
           <span className="font-semibold text-accent-primary">
-            {summary?.updatedAt ? new Date(summary.updatedAt).toLocaleTimeString() : 'Just now'}
+            {summary ? `${summary.cameraCount} cameras` : '—'}
           </span>
         </div>
       </div>
@@ -503,7 +469,7 @@ function SelectedPlaceInfoCard({ place, district, summary, onViewZones }: Select
         onClick={onViewZones}
         className="mt-1 inline-flex items-center justify-center px-3 py-2 rounded-lg bg-header text-white text-xs font-semibold hover:bg-header-dark transition-colors"
       >
-        View zone-wise crowd map
+        View status & alerts
       </button>
     </div>
   );

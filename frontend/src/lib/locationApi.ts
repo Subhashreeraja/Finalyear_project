@@ -9,115 +9,57 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 export async function fetchDistricts(): Promise<District[]> {
-  try {
-    return await fetchJson<District[]>(`${API_BASE}/districts`);
-  } catch {
-    return getMockDistricts();
-  }
+  return fetchJson<District[]>(`${API_BASE}/districts`);
 }
 
 export async function fetchPlacesByDistrict(districtId: string): Promise<Place[]> {
-  try {
-    return await fetchJson<Place[]>(`${API_BASE}/districts/${districtId}/places`);
-  } catch {
-    return getMockPlaces(districtId);
-  }
+  return fetchJson<Place[]>(`${API_BASE}/districts/${districtId}/places`);
 }
 
 export async function fetchPlace(placeId: string): Promise<Place | null> {
-  try {
-    return await fetchJson<Place | null>(`${API_BASE}/places/${placeId}`);
-  } catch {
-    return getMockPlaceById(placeId);
-  }
+  return fetchJson<Place | null>(`${API_BASE}/places/${placeId}`);
 }
 
 export async function fetchZonesByPlace(placeId: string): Promise<Zone[]> {
-  try {
-    return await fetchJson<Zone[]>(`${API_BASE}/places/${placeId}/zones`);
-  } catch {
-    return getMockZones(placeId);
-  }
+  return fetchJson<Zone[]>(`${API_BASE}/places/${placeId}/zones`);
 }
 
 export async function fetchZoneStatus(placeId: string): Promise<ZoneStatus[]> {
-  try {
-    return await fetchJson<ZoneStatus[]>(`${API_BASE}/places/${placeId}/zones/status`);
-  } catch {
-    return getMockZoneStatus(placeId);
-  }
+  return fetchJson<ZoneStatus[]>(`${API_BASE}/places/${placeId}/zones/status`);
 }
 
-// --- Mock data for development / when backend is not available ---
-
-function getMockDistricts(): District[] {
-  return [
-    // Example Tamil Nadu districts
-    { id: 'd1', name: 'Chennai', lat: 13.0827, lng: 80.2707, placeCount: 5 },
-    { id: 'd2', name: 'Salem', lat: 11.6643, lng: 78.1460, placeCount: 4 },
-    { id: 'd3', name: 'Coimbatore', lat: 11.0168, lng: 76.9558, placeCount: 6 },
-  ];
+/** Real camera status for a place (from admin camera service). */
+export interface PlaceCameraStatus {
+  id: number;
+  name: string;
+  peopleCount: number;
+  status: 'Safe' | 'Warning' | 'Overcrowded';
 }
 
-function getMockPlaceById(placeId: string): Place | null {
-  const all = Object.values(getMockPlacesByDistrictMap()).flat();
-  return all.find((p) => p.id === placeId) ?? null;
-}
-
-function getMockPlacesByDistrictMap(): Record<string, Place[]> {
-  return {
-    d1: [
-      { id: 'p1', districtId: 'd1', name: 'Chennai Central Railway Station', type: 'railway_station', lat: 13.0827, lng: 80.2707 },
-      { id: 'p2', districtId: 'd1', name: 'Chennai Mofussil Bus Terminus', type: 'bus_stand', lat: 13.0820, lng: 80.2751 },
-      { id: 'p3', districtId: 'd1', name: 'T. Nagar Market', type: 'market', lat: 13.0358, lng: 80.2300 },
-    ],
-    d2: [
-      { id: 'p4', districtId: 'd2', name: 'Salem Railway Junction', type: 'railway_station', lat: 11.6643, lng: 78.1460 },
-      { id: 'p5', districtId: 'd2', name: 'Salem New Bus Stand', type: 'bus_stand', lat: 11.6640, lng: 78.1510 },
-      { id: 'p8', districtId: 'd2', name: 'Kottai Mariamman Temple', type: 'temple', lat: 11.6648, lng: 78.1450 },
-    ],
-    d3: [
-      { id: 'p6', districtId: 'd3', name: 'Gandhipuram Bus Stand', type: 'bus_stand', lat: 11.0170, lng: 76.9660 },
-      { id: 'p7', districtId: 'd3', name: 'Codissia Event Ground', type: 'event_ground', lat: 11.0290, lng: 77.0380 },
-    ],
+export interface PlaceStatusResponse {
+  place: Place;
+  cameras: PlaceCameraStatus[];
+  totalCount: number;
+  status: 'Safe' | 'Warning' | 'Overcrowded';
+  alert: {
+    threshold: number;
+    alertTriggered: boolean;
   };
 }
 
-function getMockPlaces(districtId: string): Place[] {
-  return getMockPlacesByDistrictMap()[districtId] ?? [];
+export async function fetchPlaceStatus(placeId: string): Promise<PlaceStatusResponse> {
+  return fetchJson<PlaceStatusResponse>(`${API_BASE}/places/${placeId}/status`);
 }
 
-function getMockZones(placeId: string): Zone[] {
-  const place = getMockPlaceById(placeId);
-  const base = place ? { lat: place.lat, lng: place.lng } : { lat: 13.0827, lng: 80.2707 };
-  const d = 0.002;
-  return [
-    {
-      id: 'z1', placeId, name: 'Zone 1', order: 1,
-      polygon: [[base.lat - d, base.lng - d], [base.lat + d, base.lng - d], [base.lat + d, base.lng], [base.lat - d, base.lng]],
-      crowdLevel: 'low', crowdCount: 50, capacity: 500,
-    },
-    {
-      id: 'z2', placeId, name: 'Zone 2', order: 2,
-      polygon: [[base.lat - d, base.lng], [base.lat + d, base.lng], [base.lat + d, base.lng + d], [base.lat - d, base.lng + d]],
-      crowdLevel: 'moderate', crowdCount: 320, capacity: 500,
-    },
-    {
-      id: 'z3', placeId, name: 'Zone 3', order: 3,
-      polygon: [[base.lat, base.lng - d], [base.lat + d * 1.5, base.lng - d], [base.lat + d * 1.5, base.lng + d], [base.lat, base.lng + d]],
-      crowdLevel: 'high', crowdCount: 480, capacity: 500,
-    },
-  ];
+export interface CrowdByPlaceType {
+  [placeType: string]: {
+    totalCount: number;
+    status: 'Safe' | 'Warning' | 'Overcrowded';
+    cameraCount: number;
+    alertTriggered: boolean;
+  };
 }
 
-function getMockZoneStatus(placeId: string): ZoneStatus[] {
-  const zones = getMockZones(placeId);
-  return zones.map((z) => ({
-    zoneId: z.id,
-    zoneName: z.name,
-    crowdLevel: z.crowdLevel,
-    crowdCount: z.crowdCount ?? 0,
-    capacity: z.capacity ?? 500,
-    updatedAt: new Date().toISOString(),
-  }));
+export async function fetchCrowdByPlaceType(): Promise<CrowdByPlaceType> {
+  return fetchJson<CrowdByPlaceType>(`${API_BASE}/crowd-by-place-type`);
 }
