@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CircleMarker, Popup } from 'react-leaflet';
+import { CircleMarker, Popup, Marker } from 'react-leaflet';
 import MapContainer from '../../components/location/MapContainer';
 import SetMapView from '../../components/location/SetMapView';
-import { fetchDistricts, fetchPlacesByDistrict, fetchCrowdByPlaceType } from '../../lib/locationApi';
+import { fetchPlacesByDistrict, fetchCrowdByPlaceType } from '../../lib/locationApi';
 import type { CrowdLevel, District, Place } from '../../types/location';
 
 const DEFAULT_CENTER: [number, number] = [13.0827, 80.2707];
@@ -22,6 +22,20 @@ interface PlaceCrowdSummary {
   totalCount: number;
   cameraCount: number;
   alertTriggered: boolean;
+}
+
+const STATIC_DISTRICTS: District[] = [
+  { id: 'd2', name: 'Salem', lat: 11.6643, lng: 78.1460, placeCount: 5 },
+];
+
+const CROWD_LIMIT = 100;
+const REOPEN_THRESHOLD = 75;
+
+type GateStatus = 'OPEN' | 'CLOSED';
+
+interface DistrictGateState {
+  crowd: number;
+  gateStatus: GateStatus;
 }
 
 const PLACE_TYPE_LABELS: Record<PlaceType, string> = {
@@ -62,6 +76,7 @@ export default function LocationPage() {
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState('');
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedDistrictId, setSelectedDistrictId] = useState<string | null>(null);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
 
@@ -69,20 +84,32 @@ export default function LocationPage() {
   const [typeFilter, setTypeFilter] = useState<PlaceType[]>([]);
   const [crowdFilter, setCrowdFilter] = useState<CrowdLevel[]>([]);
 
+  const [districtGates, setDistrictGates] = useState<Record<string, DistrictGateState>>({});
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setLoading(true);
       try {
-        const ds = await fetchDistricts();
+        const ds = STATIC_DISTRICTS;
         if (cancelled) return;
         setDistricts(ds);
 
-        const placesByDistrict = await Promise.all(ds.map((d) => fetchPlacesByDistrict(d.id)));
-        if (cancelled) return;
-        const allPlaces = placesByDistrict.flat();
-        setPlaces(allPlaces);
+        try {
+          const placesByDistrict = await Promise.all(
+            ds.map((d) =>
+              fetchPlacesByDistrict(d.id).catch(() => [] as Place[]),
+            ),
+          );
+          if (cancelled) return;
+          const allPlaces = placesByDistrict.flat();
+          setPlaces(allPlaces);
+        } catch {
+          if (!cancelled) {
+            setPlaces([]);
+          }
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -120,6 +147,37 @@ export default function LocationPage() {
     };
   }, []);
 
+  // Compute per-district crowd and gate status with hysteresis
+  useEffect(() => {
+    if (!districts.length) return;
+    setDistrictGates((prev) => {
+      const next: Record<string, DistrictGateState> = {};
+      for (const d of districts) {
+        const placeTypesInDistrict = new Set(
+          places.filter((p) => p.districtId === d.id).map((p) => p.type),
+        );
+        let crowd = 0;
+        placeTypesInDistrict.forEach((pt) => {
+          const summary = crowdByPlaceType[pt];
+          if (summary) {
+            crowd += summary.totalCount;
+          }
+        });
+
+        const prevGate = prev[d.id]?.gateStatus ?? 'OPEN';
+        let gate: GateStatus = prevGate;
+        if (prevGate === 'CLOSED') {
+          gate = crowd <= REOPEN_THRESHOLD ? 'OPEN' : 'CLOSED';
+        } else {
+          gate = crowd > CROWD_LIMIT ? 'CLOSED' : 'OPEN';
+        }
+
+        next[d.id] = { crowd, gateStatus: gate };
+      }
+      return next;
+    });
+  }, [districts, places, crowdByPlaceType]);
+
   const selectedPlace = useMemo(
     () => places.find((p) => p.id === selectedPlaceId) ?? null,
     [places, selectedPlaceId],
@@ -143,32 +201,37 @@ export default function LocationPage() {
     return districts.map((d) => d.id);
   }, [districtFilter, selectedDistrict, districts]);
 
-  // When user types an exact district or place name, auto-focus that location.
+  // When user types a district or place name, auto-focus that location.
   useEffect(() => {
-    if (!searchQuery) return;
-    // 1) Exact district name match → focus that district.
-    const districtMatch = districts.find((d) => d.name.toLowerCase() === searchQuery);
+    if (!searchQuery) {
+      setSearchError(null);
+      return;
+    }
+    // 1) District name contains query → focus that district.
+    const districtMatch = districts.find((d) =>
+      d.name.toLowerCase().includes(searchQuery),
+    );
     if (districtMatch) {
       setSelectedDistrictId(districtMatch.id);
       setSelectedPlaceId(null);
       setDistrictFilter([districtMatch.id]);
+      setSearchError(null);
       return;
     }
 
-    // 2) Exact place name match.
-    // If a district is already chosen, search only in that district.
-    // Otherwise, default to Salem district if available.
-    const baseDistrictId = selectedDistrictId ?? defaultDistrictId;
-    if (!baseDistrictId) return;
-
-    const placeMatch = places.find(
-      (p) => p.districtId === baseDistrictId && p.name.toLowerCase() === searchQuery,
+    // 2) Place name contains query (search across all places).
+    const placeMatch = places.find((p) =>
+      p.name.toLowerCase().includes(searchQuery),
     );
-    if (!placeMatch) return;
+    if (!placeMatch) {
+      setSearchError('District not found');
+      return;
+    }
 
     setSelectedPlaceId(placeMatch.id);
     setSelectedDistrictId(placeMatch.districtId);
     setDistrictFilter([placeMatch.districtId]);
+    setSearchError(null);
   }, [searchQuery, districts, places, selectedDistrictId, defaultDistrictId]);
 
   const filteredPlaces = useMemo(() => {
@@ -219,7 +282,27 @@ export default function LocationPage() {
   };
 
   const toggleTypeFilter = (type: PlaceType) => {
-    setTypeFilter((prev) => (prev.includes(type) ? prev.filter((x) => x !== type) : [...prev, type]));
+    setTypeFilter((prev) => {
+      const next = prev.includes(type) ? prev.filter((x) => x !== type) : [...prev, type];
+
+      // When exactly one type is selected, auto-focus a popular Salem place of that type.
+      if (next.length === 1) {
+        const selectedType = next[0];
+        const salemDistrict = districts.find((d) => d.name.toLowerCase() === 'salem');
+        if (salemDistrict) {
+          const popularPlace = places.find(
+            (p) => p.type === selectedType && p.districtId === salemDistrict.id,
+          );
+          if (popularPlace) {
+            setSelectedPlaceId(popularPlace.id);
+            setSelectedDistrictId(salemDistrict.id);
+            setDistrictFilter([salemDistrict.id]);
+          }
+        }
+      }
+
+      return next;
+    });
   };
 
   const toggleCrowdFilter = (level: CrowdLevel) => {
@@ -269,6 +352,9 @@ export default function LocationPage() {
                   aria-label="Search district, place, or landmark"
                 />
               </div>
+              {searchError && (
+                <p className="mt-2 text-xs text-red-600">{searchError}</p>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -294,9 +380,6 @@ export default function LocationPage() {
                       </button>
                     );
                   })}
-                  {districts.length === 0 && (
-                    <span className="text-xs text-accent-muted">No districts available</span>
-                  )}
                 </div>
               </div>
 
@@ -378,6 +461,36 @@ export default function LocationPage() {
           <div className="bg-white/90 backdrop-blur rounded-2xl shadow-md border border-purple-100 h-[420px] sm:h-[480px] lg:h-[560px] overflow-hidden">
             <MapContainer center={mapCenter} zoom={mapZoom} className="h-full w-full rounded-2xl">
               <SetMapView center={mapCenter} zoom={mapZoom} />
+              {districts.map((d) => {
+                const gate = districtGates[d.id];
+                const crowd = gate?.crowd ?? 0;
+                const gateStatus = gate?.gateStatus ?? 'OPEN';
+                return (
+                  <Marker
+                    key={d.id}
+                    position={[d.lat, d.lng]}
+                    eventHandlers={{
+                      click: () => setSelectedDistrictId(d.id),
+                    }}
+                  >
+                    <Popup>
+                      <div className="space-y-1 text-left">
+                        <p className="text-sm font-semibold text-accent-primary">{d.name}</p>
+                        <p className="text-xs text-accent-muted">
+                          Crowd: {crowd.toLocaleString()}
+                        </p>
+                        <p
+                          className={`text-xs font-semibold ${
+                            gateStatus === 'OPEN' ? 'text-green-700' : 'text-red-700'
+                          }`}
+                        >
+                          Gate: {gateStatus}
+                        </p>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
               {filteredPlaces.map((p) => {
                 const summary = crowdByPlaceType[p.type];
                 const level = summary?.level ?? 'low';
