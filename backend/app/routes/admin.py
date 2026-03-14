@@ -1,13 +1,8 @@
 import os
-from datetime import datetime, timedelta
-from functools import wraps
-from typing import Any, Dict
+from flask import Blueprint, Response, jsonify, request
 
-import jwt
-from flask import Blueprint, Response, current_app, jsonify, request
-
+from app.auth_utils import admin_required, role_required, get_token_from_request, decode_jwt
 from app.models.admin_models import (
-    AdminUser,
     CrowdStatusResponse,
     OverviewResponse,
     PlaceOverview,
@@ -30,87 +25,40 @@ PLACE_TYPES: tuple[PlaceType, ...] = (
     "bus_stand",
     "temple",
 )
-_gate_status_by_place: Dict[str, str] = {pt: "closed" for pt in PLACE_TYPES}
+_gate_status_by_place: dict[str, str] = {pt: "closed" for pt in PLACE_TYPES}
 
 
-def _get_admin_credentials() -> tuple[str, str]:
-    email = os.getenv("ADMIN_EMAIL", "admin@crowdai.local")
-    password = os.getenv("ADMIN_PASSWORD", "admin123")
-    return email, password
+dashboard_required = role_required("ADMIN", "SYSTEM_ADMIN", "MONITOR", "LOCATION_ADMIN", "PUBLIC")
 
 
-def _encode_jwt(admin: AdminUser) -> str:
-    secret = current_app.config.get("SECRET_KEY", "dev-secret-key")
-    payload = {
-        "sub": admin.email,
-        "role": admin.role,
-        "name": admin.name,
-        "exp": datetime.utcnow() + timedelta(hours=8),
-    }
-    return jwt.encode(payload, secret, algorithm="HS256")
-
-
-def _decode_jwt(token: str) -> Dict[str, Any] | None:
-    secret = current_app.config.get("SECRET_KEY", "dev-secret-key")
-    try:
-        return jwt.decode(token, secret, algorithms=["HS256"])
-    except jwt.PyJWTError:
+def _get_user_location_filter():
+    """For LOCATION_ADMIN, return their assigned place_type to filter. None = show all."""
+    token = get_token_from_request()
+    if not token:
         return None
-
-
-def _get_token_from_header() -> str | None:
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    payload = decode_jwt(token)
+    if not payload:
         return None
-    return auth_header.split(" ", 1)[1].strip()
-
-
-def admin_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        token = _get_token_from_header()
-        if not token:
-            return jsonify({"error": "Missing Authorization header"}), 401
-        payload = _decode_jwt(token)
-        if not payload or payload.get("role") != "admin":
-            return jsonify({"error": "Invalid or expired token"}), 401
-        return fn(*args, **kwargs)
-
-    return wrapper
-
-
-@bp.route("/login", methods=["POST"])
-def login():
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    password = (data.get("password") or "").strip()
-    admin_email, admin_password = _get_admin_credentials()
-    if email != admin_email.lower() or password != admin_password:
-        return jsonify({"error": "Invalid admin credentials"}), 401
-
-    admin = AdminUser(email=admin_email, name="System Admin")
-    token = _encode_jwt(admin)
-    return jsonify(
-        {
-            "token": token,
-            "admin": {
-                "email": admin.email,
-                "name": admin.name,
-                "role": admin.role,
-            },
-        }
-    )
+    role = payload.get("role")
+    location = payload.get("location")
+    if role in ("LOCATION_ADMIN", "MONITOR") and location:
+        return location
+    return None
 
 
 @bp.route("/overview", methods=["GET"])
+@dashboard_required
 def overview():
     from app.services.camera_service import get_camera_state
 
+    place_filter = _get_user_location_filter()
     cams = list(list_cameras())
+    if place_filter:
+        cams = [c for c in cams if c.place_type == place_filter]
     active = 0
     total_count = 0
     # Per-place stats: place_type -> (total_cameras, active, crowd_count)
-    by_place: Dict[str, tuple[int, int, int]] = {pt: (0, 0, 0) for pt in PLACE_TYPES}
+    by_place: dict[str, tuple[int, int, int]] = {pt: (0, 0, 0) for pt in PLACE_TYPES}
     for cam in cams:
         state = get_camera_state(cam.id)
         is_active = bool(state.get("active"))
@@ -180,8 +128,14 @@ def stream(camera_id: int):
 
 
 @bp.route("/crowd-status", methods=["GET"])
+@dashboard_required
 def crowd_status():
     statuses, total, overall = summarize_crowd()
+    place_filter = _get_user_location_filter()
+    if place_filter:
+        statuses = [s for s in statuses if s.place_type == place_filter]
+        total = sum(s.people_count for s in statuses)
+        overall = "Overcrowded" if total > 80 else ("Warning" if total > 40 else "Safe")
     threshold = int(os.getenv("CROWD_THRESHOLD", "80"))
     alert_triggered = total > threshold
     whatsapp_sent = None

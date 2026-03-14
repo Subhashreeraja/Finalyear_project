@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import AuthModal from './components/AuthModal';
+import ProtectedRoute from './components/ProtectedRoute';
 import HomePage from './pages/HomePage';
 import DashboardPage from './pages/DashboardPage';
 import AlertsPage from './pages/AlertsPage';
@@ -15,6 +16,7 @@ import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminCamerasPage from './pages/admin/AdminCamerasPage';
 import AdminGateControlPage from './pages/admin/AdminGateControlPage';
 import AdminAlertsPage from './pages/admin/AdminAlertsPage';
+import MonitorDashboardPage from './pages/monitor/MonitorDashboardPage';
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -44,7 +46,9 @@ export default function App() {
           path="/dashboard"
           element={
             <Layout>
-              <DashboardPage />
+              <ProtectedRoute allowedRoles={['ADMIN', 'SYSTEM_ADMIN', 'MONITOR', 'LOCATION_ADMIN', 'PUBLIC']}>
+                <DashboardPage />
+              </ProtectedRoute>
             </Layout>
           }
         />
@@ -52,7 +56,9 @@ export default function App() {
           path="/alerts"
           element={
             <Layout>
-              <AlertsPage />
+              <ProtectedRoute allowedRoles={['ADMIN', 'SYSTEM_ADMIN', 'MONITOR', 'LOCATION_ADMIN', 'PUBLIC']}>
+                <AlertsPage />
+              </ProtectedRoute>
             </Layout>
           }
         />
@@ -129,6 +135,16 @@ export default function App() {
             <AdminRoute>
               <AdminAlertsPage />
             </AdminRoute>
+          }
+        />
+        <Route
+          path="/location-admin/dashboard"
+          element={
+            <Layout>
+              <ProtectedRoute allowedRoles={['MONITOR', 'LOCATION_ADMIN']}>
+                <MonitorDashboardPage />
+              </ProtectedRoute>
+            </Layout>
           }
         />
       </Routes>

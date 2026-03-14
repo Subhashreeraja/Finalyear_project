@@ -1,71 +1,80 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
-type Step = 'form' | 'otp';
-
 export default function AuthModal() {
-  const { authModalMode, closeAuthModal, login, register, sendOtp, openAuthModal } = useAuth();
-  const [step, setStep] = useState<Step>('form');
-
-  useEffect(() => {
-    if (authModalMode) setStep('form');
-  }, [authModalMode]);
+  const { authModalMode, closeAuthModal, login, register, openAuthModal } = useAuth();
+  const navigate = useNavigate();
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [mobile, setMobile] = useState('');
-  const [otp, setOtp] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (authModalMode) {
+      setName('');
+      setEmail('');
+      setMobile('');
+      setPassword('');
+      setError('');
+    }
+  }, [authModalMode]);
+
   const isRegister = authModalMode === 'register';
 
-  const handleSendOtp = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
     const digits = mobile.replace(/\D/g, '');
     if (digits.length < 10) {
       setError('Enter a valid 10-digit mobile number.');
       return;
     }
-    setLoading(true);
-    const ok = await sendOtp(mobile);
-    setLoading(false);
-    if (ok) {
-      setStep('otp');
-    } else {
-      setError('Could not send OTP. Use 123456 for demo.');
-    }
-  };
-
-  const handleSubmit = async () => {
-    setError('');
-    if (step === 'form') {
-      if (isRegister && !name.trim()) {
-        setError('Please enter your name.');
-        return;
-      }
-      await handleSendOtp();
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
       return;
     }
+    if (isRegister && !name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+    if (!email.trim()) {
+      setError('Please enter your email.');
+      return;
+    }
+
     setLoading(true);
-    const ok = isRegister
-      ? await register(name.trim(), mobile, otp)
-      : await login(mobile, otp);
+    const result = isRegister
+      ? await register(name.trim(), email.trim().toLowerCase(), mobile, password)
+      : await login(name.trim(), email.trim().toLowerCase(), mobile, password);
     setLoading(false);
-    if (ok) {
+
+    if (result.success) {
       closeAuthModal();
-      setStep('form');
-      setName('');
-      setMobile('');
-      setOtp('');
+      const raw = localStorage.getItem('crowdai_user');
+      let role: string | null = null;
+      if (raw) {
+        try {
+          role = (JSON.parse(raw) as { role?: string }).role ?? null;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (role === 'ADMIN' || role === 'SYSTEM_ADMIN') navigate('/admin/dashboard');
+      else if (role === 'LOCATION_ADMIN' || role === 'MONITOR') navigate('/location-admin/dashboard');
+      else if (role === 'PUBLIC') navigate('/dashboard');
     } else {
-      setError('Invalid OTP. Use 123456 for demo.');
+      setError(result.error || 'Something went wrong.');
     }
   };
 
   const resetAndClose = () => {
-    setStep('form');
     setName('');
+    setEmail('');
     setMobile('');
-    setOtp('');
+    setPassword('');
     setError('');
     closeAuthModal();
   };
@@ -93,94 +102,91 @@ export default function AuthModal() {
           </button>
         </div>
 
-        {step === 'form' && (
-          <>
-            {isRegister && (
-              <label className="block mb-4">
-                <span className="block text-sm font-medium text-accent-muted mb-1">Name</span>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-header focus:border-transparent"
-                />
-              </label>
-            )}
-            <label className="block mb-4">
-              <span className="block text-sm font-medium text-accent-muted mb-1">Mobile number</span>
-              <input
-                type="tel"
-                value={mobile}
-                onChange={(e) => setMobile(e.target.value)}
-                placeholder="10-digit mobile number"
-                maxLength={14}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-header focus:border-transparent"
-              />
-            </label>
-          </>
-        )}
-
-        {step === 'otp' && (
+        <form onSubmit={handleSubmit}>
           <label className="block mb-4">
-            <span className="block text-sm font-medium text-accent-muted mb-1">OTP sent to {mobile}</span>
+            <span className="block text-sm font-medium text-accent-muted mb-1">Name</span>
             <input
               type="text"
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="Enter 6-digit OTP"
-              maxLength={6}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Your name"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-header focus:border-transparent"
+              required
             />
+          </label>
+          <label className="block mb-4">
+            <span className="block text-sm font-medium text-accent-muted mb-1">Email</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="your@email.com"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-header focus:border-transparent"
+              required
+            />
+          </label>
+          <label className="block mb-4">
+            <span className="block text-sm font-medium text-accent-muted mb-1">Mobile number</span>
+            <input
+              type="tel"
+              value={mobile}
+              onChange={(e) => setMobile(e.target.value.replace(/\D/g, '').slice(0, 14))}
+              placeholder="10-digit mobile number"
+              maxLength={14}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-header focus:border-transparent"
+              required
+            />
+          </label>
+          <label className="block mb-4">
+            <span className="block text-sm font-medium text-accent-muted mb-1">Password</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+              minLength={6}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-header focus:border-transparent"
+              required
+            />
+          </label>
+
+          {error && (
+            <p className="text-red-600 text-sm mb-4">{error}</p>
+          )}
+
+          <div className="flex gap-3 mt-6">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 py-2.5 px-4 bg-header text-white font-medium rounded-lg hover:bg-header-dark disabled:opacity-60"
+            >
+              {loading ? 'Please wait…' : isRegister ? 'Register' : 'Sign In'}
+            </button>
             <button
               type="button"
-              onClick={() => setStep('form')}
-              className="mt-2 text-sm text-accent-muted hover:text-accent-primary"
-            >
-              Change number
-            </button>
-          </label>
-        )}
-
-        {error && (
-          <p className="text-red-600 text-sm mb-4">{error}</p>
-        )}
-
-        <div className="flex gap-3 mt-6">
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="flex-1 py-2.5 px-4 bg-header text-white font-medium rounded-lg hover:bg-header-dark disabled:opacity-60"
-          >
-            {loading ? 'Please wait…' : step === 'otp' ? (isRegister ? 'Register' : 'Sign In') : 'Send OTP'}
-          </button>
-          {step === 'otp' && (
-            <button
               onClick={resetAndClose}
               className="py-2.5 px-4 border border-gray-300 rounded-lg hover:bg-body"
             >
               Cancel
             </button>
-          )}
-        </div>
+          </div>
+        </form>
 
-        {step === 'form' && (
-          <p className="mt-4 text-center text-sm text-accent-muted">
-            {isRegister ? (
-              <>Already have an account?{' '}
-                <button type="button" onClick={() => openAuthModal('login')} className="text-header font-medium hover:underline">
-                  Sign In
-                </button>
-              </>
-            ) : (
-              <>New user?{' '}
-                <button type="button" onClick={() => openAuthModal('register')} className="text-header font-medium hover:underline">
-                  Register
-                </button>
-              </>
-            )}
-          </p>
-        )}
+        <p className="mt-4 text-center text-sm text-accent-muted">
+          {isRegister ? (
+            <>Already have an account?{' '}
+              <button type="button" onClick={() => openAuthModal('login')} className="text-header font-medium hover:underline">
+                Sign In
+              </button>
+            </>
+          ) : (
+            <>New user?{' '}
+              <button type="button" onClick={() => openAuthModal('register')} className="text-header font-medium hover:underline">
+                Register
+              </button>
+            </>
+          )}
+        </p>
       </div>
     </div>
   );

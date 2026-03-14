@@ -1,12 +1,17 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 import type { User } from '../types/auth';
+import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '../types/auth';
 
 interface AuthContextValue {
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
-  login: (mobile: string, otp: string) => Promise<boolean>;
-  register: (name: string, mobile: string, otp: string) => Promise<boolean>;
-  sendOtp: (mobile: string) => Promise<boolean>;
+  isAdmin: boolean;
+  isLocationAdmin: boolean;
+  isPublicUser: boolean;
+  isGuest: boolean;
+  login: (name: string, email: string, mobile: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (name: string, email: string, mobile: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   openAuthModal: (mode: 'login' | 'register') => void;
   closeAuthModal: () => void;
@@ -15,11 +20,22 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function loadStored(): { user: User | null; token: string | null } {
+  try {
+    const storedUser = localStorage.getItem(AUTH_USER_KEY);
+    const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (storedUser && storedToken) {
+      const user = JSON.parse(storedUser) as User;
+      return { user, token: storedToken };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { user: null, token: null };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem('crowdai_user');
-    return stored ? JSON.parse(stored) : null;
-  });
+  const [auth, setAuth] = useState<{ user: User | null; token: string | null }>(loadStored);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | null>(null);
 
   const openAuthModal = useCallback((mode: 'login' | 'register') => {
@@ -30,100 +46,90 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthModalMode(null);
   }, []);
 
-  const sendOtp = useCallback(async (mobile: string): Promise<boolean> => {
-    // TODO: call backend POST /api/auth/send-otp
-    try {
-      const res = await fetch('/api/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobile }),
-      });
-      if (!res.ok) {
-        // Demo: accept any 10-digit and "send" OTP (no backend yet)
-        if (mobile.replace(/\D/g, '').length >= 10) return true;
-        return false;
+  const login = useCallback(
+    async (
+      name: string,
+      email: string,
+      mobile: string,
+      password: string,
+    ): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, mobile, password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setAuth({ user: data.user, token: data.token });
+          localStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+          localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+          return { success: true };
+        }
+        return { success: false, error: data.error || 'Login failed' };
+      } catch {
+        return { success: false, error: 'Network error' };
       }
-      return true;
-    } catch {
-      // Demo: allow 10-digit mobile without backend
-      return mobile.replace(/\D/g, '').length >= 10;
-    }
-  }, []);
+    },
+    [],
+  );
 
-  const login = useCallback(async (mobile: string, otp: string): Promise<boolean> => {
-    // TODO: call backend POST /api/auth/login
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobile, otp }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser(data.user);
-        localStorage.setItem('crowdai_user', JSON.stringify(data.user));
-        return true;
+  const register = useCallback(
+    async (
+      name: string,
+      email: string,
+      mobile: string,
+      password: string,
+    ): Promise<{ success: boolean; error?: string }> => {
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, mobile, password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setAuth({ user: data.user, token: data.token });
+          localStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+          localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+          return { success: true };
+        }
+        return { success: false, error: data.error || 'Registration failed' };
+      } catch {
+        return { success: false, error: 'Network error' };
       }
-    } catch {
-      // Demo: accept OTP 123456 without backend
-      if (otp === '123456' && mobile.replace(/\D/g, '').length >= 10) {
-        const demoUser: User = {
-          id: 'demo-1',
-          name: 'Demo User',
-          mobile,
-          role: 'registered_user',
-        };
-        setUser(demoUser);
-        localStorage.setItem('crowdai_user', JSON.stringify(demoUser));
-        return true;
-      }
-    }
-    return false;
-  }, []);
-
-  const register = useCallback(async (name: string, mobile: string, otp: string): Promise<boolean> => {
-    // TODO: call backend POST /api/auth/register
-    try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, mobile, otp }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser(data.user);
-        localStorage.setItem('crowdai_user', JSON.stringify(data.user));
-        return true;
-      }
-    } catch {
-      // Demo: accept OTP 123456 without backend
-      if (otp === '123456' && name.trim() && mobile.replace(/\D/g, '').length >= 10) {
-        const demoUser: User = {
-          id: 'demo-' + Date.now(),
-          name: name.trim(),
-          mobile,
-          role: 'registered_user',
-        };
-        setUser(demoUser);
-        localStorage.setItem('crowdai_user', JSON.stringify(demoUser));
-        return true;
-      }
-    }
-    return false;
-  }, []);
+    },
+    [],
+  );
 
   const logout = useCallback(() => {
-    setUser(null);
-    localStorage.removeItem('crowdai_user');
+    setAuth({ user: null, token: null });
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem(AUTH_TOKEN_KEY);
     setAuthModalMode(null);
+    // Clear admin session if present
+    localStorage.removeItem('crowdai_admin_token');
+    localStorage.removeItem('crowdai_admin_info');
   }, []);
+
+  const user = auth.user;
+  const token = auth.token;
+  const isAuthenticated = !!user && !!token;
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SYSTEM_ADMIN';
+  const isLocationAdmin = user?.role === 'LOCATION_ADMIN' || user?.role === 'MONITOR';
+  const isPublicUser = user?.role === 'PUBLIC';
+  const isGuest = !isAuthenticated || user?.role === 'GUEST';
 
   const value: AuthContextValue = {
     user,
-    isAuthenticated: !!user,
+    token,
+    isAuthenticated,
+    isAdmin,
+    isLocationAdmin,
+    isPublicUser,
+    isGuest,
     login,
     register,
-    sendOtp,
     logout,
     openAuthModal,
     closeAuthModal,

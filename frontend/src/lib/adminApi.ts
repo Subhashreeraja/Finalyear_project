@@ -58,9 +58,38 @@ export interface CrowdStatusResponse {
 
 const ADMIN_TOKEN_KEY = 'crowdai_admin_token';
 const ADMIN_INFO_KEY = 'crowdai_admin_info';
+const AUTH_TOKEN_KEY = 'crowdai_token';
+const AUTH_USER_KEY = 'crowdai_user';
 
 export function getAdminToken(): string | null {
-  return localStorage.getItem(ADMIN_TOKEN_KEY);
+  const legacy = localStorage.getItem(ADMIN_TOKEN_KEY);
+  if (legacy) return legacy;
+  const userRaw = localStorage.getItem(AUTH_USER_KEY);
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (!userRaw || !token) return null;
+  try {
+    const user = JSON.parse(userRaw) as { role?: string };
+    if (['ADMIN', 'SYSTEM_ADMIN'].includes(user.role ?? '')) return token;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Token for dashboard/alerts - ADMIN, MONITOR, or PUBLIC */
+export function getAuthToken(): string | null {
+  const admin = getAdminToken();
+  if (admin) return admin;
+  const userRaw = localStorage.getItem(AUTH_USER_KEY);
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (!userRaw || !token) return null;
+  try {
+    const user = JSON.parse(userRaw) as { role?: string };
+    if (['ADMIN', 'SYSTEM_ADMIN', 'MONITOR', 'LOCATION_ADMIN', 'PUBLIC'].includes(user.role ?? '')) return token;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function setAdminSession(resp: AdminLoginResponse) {
@@ -71,20 +100,33 @@ export function setAdminSession(resp: AdminLoginResponse) {
 export function clearAdminSession() {
   localStorage.removeItem(ADMIN_TOKEN_KEY);
   localStorage.removeItem(ADMIN_INFO_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_USER_KEY);
 }
 
 export function getAdminInfo(): AdminInfo | null {
-  const raw = localStorage.getItem(ADMIN_INFO_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as AdminInfo;
-  } catch {
-    return null;
+  const legacy = localStorage.getItem(ADMIN_INFO_KEY);
+  if (legacy) {
+    try {
+      return JSON.parse(legacy) as AdminInfo;
+    } catch {
+      /* ignore */
+    }
   }
+  const userRaw = localStorage.getItem(AUTH_USER_KEY);
+  if (!userRaw) return null;
+  try {
+    const user = JSON.parse(userRaw) as { email?: string; name?: string; role?: string };
+    if (['ADMIN', 'SYSTEM_ADMIN'].includes(user.role ?? ''))
+      return { email: user.email ?? '', name: user.name ?? '', role: 'admin' };
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAdminToken();
+async function apiFetch<T>(path: string, options: RequestInit = {}, useAuthToken = false): Promise<T> {
+  const token = useAuthToken ? getAuthToken() : getAdminToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
@@ -97,8 +139,13 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     headers,
   });
   if (res.status === 401) {
-    clearAdminSession();
-    window.location.href = '/admin/login';
+    if (useAuthToken) {
+      clearAdminSession();
+      window.location.href = '/';
+    } else {
+      clearAdminSession();
+      window.location.href = '/admin/login';
+    }
     throw new Error('Session expired. Please log in again.');
   }
   if (!res.ok) {
@@ -108,27 +155,12 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return (await res.json()) as T;
 }
 
-export async function adminLogin(email: string, password: string): Promise<AdminLoginResponse> {
-  const res = await fetch('/api/admin/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || 'Invalid credentials');
-  }
-  const data = (await res.json()) as AdminLoginResponse;
-  setAdminSession(data);
-  return data;
-}
-
 export function adminLogout() {
   clearAdminSession();
 }
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
-  return apiFetch<AdminOverview>('/overview');
+  return apiFetch<AdminOverview>('/overview', {}, true);
 }
 
 export async function fetchAdminCameras(): Promise<AdminCamera[]> {
@@ -136,7 +168,7 @@ export async function fetchAdminCameras(): Promise<AdminCamera[]> {
 }
 
 export async function fetchCrowdStatus(): Promise<CrowdStatusResponse> {
-  return apiFetch<CrowdStatusResponse>('/crowd-status');
+  return apiFetch<CrowdStatusResponse>('/crowd-status', {}, true);
 }
 
 export async function updateGate(

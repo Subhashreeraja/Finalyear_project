@@ -3,32 +3,31 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getAdminInfo } from '../lib/adminApi';
 
-const navLinks = [
-  { to: '/', label: 'Home' },
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/alerts', label: 'Alerts' },
-  { to: '/location', label: 'Location', hasDropdown: true },
-  { to: '/events', label: 'Events', hasDropdown: true },
-];
+function getNavLinks(isAuthenticated: boolean, isLocationAdmin: boolean) {
+  const links = [
+    { to: '/', label: 'Home' },
+    ...(isAuthenticated ? [{ to: '/dashboard', label: 'Dashboard' }, { to: '/alerts', label: 'Alerts' }] : []),
+    ...(isLocationAdmin ? [{ to: '/location-admin/dashboard', label: 'Location Admin' }] : []),
+    { to: '/location', label: 'Location', hasDropdown: true },
+    { to: '/events', label: 'Events', hasDropdown: true },
+  ];
+  return links;
+}
 
 export default function Header() {
-  const { user, isAuthenticated, openAuthModal, logout } = useAuth();
+  const { isAuthenticated, isLocationAdmin, openAuthModal, logout } = useAuth();
+  const navLinks = getNavLinks(isAuthenticated, isLocationAdmin);
   const [eventsOpen, setEventsOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const profileRef = useRef<HTMLDivElement>(null);
-  const profileRefMobile = useRef<HTMLDivElement>(null);
   const eventsRef = useRef<HTMLDivElement>(null);
   const locationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Node;
-      const insideProfile = (profileRef.current?.contains(target) || profileRefMobile.current?.contains(target));
       const insideEvents = eventsRef.current?.contains(target);
       const insideLocation = locationRef.current?.contains(target);
-      if (!insideProfile && !insideEvents && !insideLocation) {
-        setProfileOpen(false);
+      if (!insideEvents && !insideLocation) {
         setEventsOpen(false);
         setLocationOpen(false);
       }
@@ -86,92 +85,51 @@ export default function Header() {
             )}
             {getAdminInfo() ? (
               <Link to="/admin/dashboard" className="hover:opacity-90 text-white/90">
-                Admin
+                System Admin
               </Link>
             ) : (
-              <Link to="/admin/login" className="hover:opacity-90 text-white/80 text-sm">
-                Admin login
-              </Link>
-            )}
-
-            {/* Profile: icon with "Profile" below */}
-            <div className="relative flex flex-col items-center" ref={profileRef}>
               <button
-                onClick={() =>
-                  isAuthenticated ? setProfileOpen((o) => !o) : openAuthModal('login')
-                }
-                className="hover:opacity-90"
-                aria-label="Profile"
+                type="button"
+                onClick={() => openAuthModal('login')}
+                className="flex items-center gap-2 hover:opacity-90 text-white font-medium"
+                aria-label="Login"
               >
-                <span className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                  {isAuthenticated && user?.name ? (
-                    <span className="text-sm font-semibold">
-                      {user.name.charAt(0).toUpperCase()}
-                    </span>
-                  ) : (
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
-                      <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                </span>
+                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" />
+                </svg>
+                <span>Login</span>
               </button>
-              {isAuthenticated && profileOpen && (
-                <div className="absolute right-0 top-full mt-1 w-52 py-2 bg-white text-accent-primary rounded-lg shadow-lg">
-                  <div className="px-4 py-2 border-b border-body">
-                    <p className="font-medium truncate">{user?.name}</p>
-                    <p className="text-sm text-accent-muted truncate">{user?.mobile}</p>
-                    <p className="text-xs text-accent-muted capitalize">{user?.role?.replace('_', ' ')}</p>
-                  </div>
-                  <Link
-                    to="/dashboard"
-                    className="block px-4 py-2 hover:bg-body"
-                    onClick={() => setProfileOpen(false)}
-                  >
-                    Dashboard
-                  </Link>
-                  <button
-                    onClick={() => {
-                      logout();
-                      setProfileOpen(false);
-                    }}
-                    className="w-full text-left px-4 py-2 hover:bg-body text-red-600"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
+            {isAuthenticated && (
+              <button
+                type="button"
+                onClick={() => logout()}
+                className="hover:opacity-90 text-white/90 text-sm font-medium"
+              >
+                Sign Out
+              </button>
+            )}
           </nav>
 
-          {/* Mobile: profile icon with Profile below */}
-          <div className="md:hidden relative flex flex-col items-center" ref={profileRefMobile}>
-            <button
-              onClick={() => (isAuthenticated ? setProfileOpen((o) => !o) : openAuthModal('login'))}
-              className="p-1"
-              aria-label="Profile"
-            >
-              <span className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                {isAuthenticated && user?.name ? (
-                  <span className="text-sm font-semibold">
-                    {user.name.charAt(0).toUpperCase()}
-                  </span>
-                ) : (
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                  </svg>
-                )}
-              </span>
-            </button>
-            {isAuthenticated && profileOpen && (
-              <div className="absolute right-0 top-full mt-1 w-52 py-2 bg-white text-accent-primary rounded-lg shadow-lg z-50">
-                <div className="px-4 py-2 border-b border-body">
-                  <p className="font-medium truncate">{user?.name}</p>
-                  <p className="text-sm text-accent-muted truncate">{user?.mobile}</p>
-                  <p className="text-xs text-accent-muted capitalize">{user?.role?.replace('_', ' ')}</p>
-                </div>
-                <Link to="/dashboard" className="block px-4 py-2 hover:bg-body" onClick={() => setProfileOpen(false)}>Dashboard</Link>
-                <button onClick={() => { logout(); setProfileOpen(false); }} className="w-full text-left px-4 py-2 hover:bg-body text-red-600">Sign Out</button>
-              </div>
+          {/* Mobile: Login / Sign Out */}
+          <div className="md:hidden flex items-center gap-3">
+            {isAuthenticated ? (
+              <button
+                type="button"
+                onClick={() => logout()}
+                className="hover:opacity-90 text-white/90 text-sm font-medium"
+              >
+                Sign Out
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => openAuthModal('login')}
+                className="hover:opacity-90 text-white font-medium text-sm"
+              >
+                Login
+              </button>
             )}
           </div>
         </div>

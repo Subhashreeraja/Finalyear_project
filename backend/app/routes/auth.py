@@ -1,121 +1,149 @@
-from flask import Blueprint, request, jsonify, current_app
-from app.db import get_conn, init_db
-from app.services.twilio_service import send_sms_otp
-import random
-import string
-from datetime import datetime, timedelta
+"""Smart City auth: Login and Registration for Admin, Monitor, Public User."""
+import re
+from flask import Blueprint, request, jsonify
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from app.db import get_conn, init_db, ROLES
+from app.auth_utils import encode_jwt
 
 bp = Blueprint("auth", __name__)
 
-ROLES = ("super_admin", "zone_admin", "registered_user", "guest")
+# Validation helpers
+def normalize_mobile(mobile: str) -> str:
+    return re.sub(r"\D", "", str(mobile or "").strip())
 
-def generate_otp(length=6):
-    return "".join(random.choices(string.digits, k=length))
+def is_valid_email(email: str) -> bool:
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    return bool(re.match(pattern, (email or "").strip().lower()))
 
-@bp.route("/send-otp", methods=["POST"])
-def send_otp():
-    data = request.get_json() or {}
-    mobile = (data.get("mobile") or "").strip().replace(" ", "")
-    if len(mobile) < 10:
-        return jsonify({"error": "Invalid mobile number"}), 400
-    otp = generate_otp()
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO otp_codes (mobile, code, expires_at) VALUES (%s, %s, %s) ON CONFLICT (mobile) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at",
-        (mobile, otp, datetime.utcnow() + timedelta(minutes=10)),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-    sent = send_sms_otp(mobile, otp)
-    if not sent:
-        # Still allow login with this OTP (e.g. log or use fallback)
-        pass
-    return jsonify({"success": True, "message": "OTP sent"})
+def validate_password(pwd: str) -> tuple[bool, str]:
+    if len(pwd) < 6:
+        return False, "Password must be at least 6 characters"
+    return True, ""
 
 @bp.route("/register", methods=["POST"])
 def register():
+    """Public User self-registration. Requires name, email, mobile, password."""
     init_db()
     data = request.get_json() or {}
     name = (data.get("name") or "").strip()
-    mobile = (data.get("mobile") or "").strip().replace(" ", "")
-    otp = (data.get("otp") or "").strip()
-    if not name or len(mobile) < 10 or len(otp) < 4:
-        return jsonify({"error": "Name, mobile and OTP required"}), 400
+    email = (data.get("email") or "").strip().lower()
+    mobile = normalize_mobile(data.get("mobile") or "")
+    password = (data.get("password") or "").strip()
+
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+    if not is_valid_email(email):
+        return jsonify({"error": "Invalid email format"}), 400
+    if len(mobile) < 10:
+        return jsonify({"error": "Valid 10-digit mobile number is required"}), 400
+    ok, msg = validate_password(password)
+    if not ok:
+        return jsonify({"error": msg}), 400
+
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT code, expires_at FROM otp_codes WHERE mobile = %s", (mobile,))
-    row = cur.fetchone()
-    if not row or row["code"] != otp or datetime.fromisoformat(str(row["expires_at"])) < datetime.utcnow():
+    cur.execute("SELECT id FROM users WHERE email = %s OR mobile = %s", (email, mobile))
+    if cur.fetchone():
         cur.close()
         conn.close()
-        return jsonify({"error": "Invalid or expired OTP"}), 400
+        return jsonify({"error": "Email or mobile already registered"}), 400
+
+    password_hash = generate_password_hash(password)
     cur.execute(
-        "INSERT INTO users (name, mobile, role) VALUES (%s, %s, 'registered_user') ON CONFLICT (mobile) DO UPDATE SET name = EXCLUDED.name RETURNING id, name, mobile, role, zone_id",
-        (name, mobile),
+        """INSERT INTO users (name, email, mobile, password_hash, role, verified)
+           VALUES (%s, %s, %s, %s, 'PUBLIC', FALSE)
+           RETURNING id, name, email, mobile, role, location, verified""",
+        (name, email, mobile, password_hash),
     )
-    user_row = cur.fetchone()
-    cur.execute("DELETE FROM otp_codes WHERE mobile = %s", (mobile,))
+    row = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
+
     user = {
-        "id": str(user_row["id"]),
-        "name": user_row["name"],
-        "mobile": user_row["mobile"],
-        "role": user_row["role"],
-        "zoneId": str(user_row["zone_id"]) if user_row["zone_id"] else None,
+        "id": str(row["id"]),
+        "name": row["name"],
+        "email": row["email"],
+        "mobile": row["mobile"],
+        "role": row["role"],
+        "location": row["location"],
+        "verified": bool(row["verified"]),
     }
-    return jsonify({"user": user})
+    token = encode_jwt(
+        user_id=int(row["id"]),
+        email=row["email"],
+        role=row["role"],
+        name=row["name"],
+        location=row["location"],
+    )
+    return jsonify({"user": user, "token": token})
+
 
 @bp.route("/login", methods=["POST"])
 def login():
+    """Login for Admin, Monitor, Public User. All 4 fields required. For Public User, all must match."""
+    init_db()
     data = request.get_json() or {}
-    mobile = (data.get("mobile") or "").strip().replace(" ", "")
-    otp = (data.get("otp") or "").strip()
-    if len(mobile) < 10 or len(otp) < 4:
-        return jsonify({"error": "Mobile and OTP required"}), 400
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    mobile = normalize_mobile(data.get("mobile") or "")
+    password = (data.get("password") or "").strip()
+
+    if not all([name, email, mobile, password]):
+        return jsonify({"error": "Name, email, mobile and password are required"}), 400
+    if not is_valid_email(email):
+        return jsonify({"error": "Invalid email format"}), 400
+    if len(mobile) < 10:
+        return jsonify({"error": "Valid 10-digit mobile number is required"}), 400
+
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT code, expires_at FROM otp_codes WHERE mobile = %s", (mobile,))
+    cur.execute(
+        """SELECT id, name, email, mobile, password_hash, role, location, verified
+           FROM users WHERE email = %s""",
+        (email,),
+    )
     row = cur.fetchone()
-    otp_valid = False
-    if row:
-        expires = row["expires_at"]
-        if hasattr(expires, "replace"):
-            try:
-                expires = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
-            except Exception:
-                expires = expires
-        otp_valid = row["code"] == otp and expires > datetime.utcnow()
-    if not otp_valid:
-        cur.execute("SELECT id, name, mobile, role, zone_id FROM users WHERE mobile = %s", (mobile,))
-        user_row = cur.fetchone()
-        if user_row and otp == "123456":
-            cur.close()
-            conn.close()
-            user = {"id": str(user_row["id"]), "name": user_row["name"], "mobile": user_row["mobile"], "role": user_row["role"], "zoneId": str(user_row["zone_id"]) if user_row["zone_id"] else None}
-            return jsonify({"user": user})
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Invalid or expired OTP"}), 400
-    else:
-        cur.execute("SELECT id, name, mobile, role, zone_id FROM users WHERE mobile = %s", (mobile,))
-        user_row = cur.fetchone()
-        if not user_row:
-            cur.close()
-            conn.close()
-            return jsonify({"error": "User not found. Please register first."}), 400
-        cur.execute("DELETE FROM otp_codes WHERE mobile = %s", (mobile,))
-        conn.commit()
-        cur.close()
-        conn.close()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if not check_password_hash(row["password_hash"], password):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    # For PUBLIC users: validate that name and mobile also match
+    if row["role"] == "PUBLIC":
+        if row["name"].strip().lower() != name.lower():
+            return jsonify({"error": "Invalid credentials"}), 401
+        if normalize_mobile(row["mobile"]) != mobile:
+            return jsonify({"error": "Invalid credentials"}), 401
+
+    # For Admin/Monitor: name and mobile are optional extra checks; we already matched email+password
+    # Per requirements, all 4 fields are used for login - we validate name and mobile match for consistency
+    if row["name"].strip().lower() != name.lower():
+        return jsonify({"error": "Invalid credentials"}), 401
+    if normalize_mobile(row["mobile"]) != mobile:
+        return jsonify({"error": "Invalid credentials"}), 401
+
     user = {
-        "id": str(user_row["id"]),
-        "name": user_row["name"],
-        "mobile": user_row["mobile"],
-        "role": user_row["role"],
-        "zoneId": str(user_row["zone_id"]) if user_row["zone_id"] else None,
+        "id": str(row["id"]),
+        "name": row["name"],
+        "email": row["email"],
+        "mobile": row["mobile"],
+        "role": row["role"],
+        "location": row["location"],
+        "verified": bool(row["verified"]),
     }
-    return jsonify({"user": user})
+    token = encode_jwt(
+        user_id=row["id"],
+        email=row["email"],
+        role=row["role"],
+        name=row["name"],
+        location=row["location"],
+    )
+    return jsonify({"user": user, "token": token})
