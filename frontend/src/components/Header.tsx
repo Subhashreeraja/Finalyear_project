@@ -1,4 +1,3 @@
-import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getAdminInfo } from '../lib/adminApi';
@@ -8,8 +7,7 @@ function getNavLinks(isAuthenticated: boolean, isLocationAdmin: boolean) {
     { to: '/', label: 'Home' },
     ...(isAuthenticated ? [{ to: '/dashboard', label: 'Dashboard' }, { to: '/alerts', label: 'Alerts' }] : []),
     ...(isLocationAdmin ? [{ to: '/location-admin/dashboard', label: 'Location Admin' }] : []),
-    { to: '/location', label: 'Location', hasDropdown: true },
-    { to: '/events', label: 'Events', hasDropdown: true },
+    { to: '/location', label: 'Location' },
   ];
   return links;
 }
@@ -17,24 +15,6 @@ function getNavLinks(isAuthenticated: boolean, isLocationAdmin: boolean) {
 export default function Header() {
   const { isAuthenticated, isLocationAdmin, openAuthModal, logout } = useAuth();
   const navLinks = getNavLinks(isAuthenticated, isLocationAdmin);
-  const [eventsOpen, setEventsOpen] = useState(false);
-  const [locationOpen, setLocationOpen] = useState(false);
-  const eventsRef = useRef<HTMLDivElement>(null);
-  const locationRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node;
-      const insideEvents = eventsRef.current?.contains(target);
-      const insideLocation = locationRef.current?.contains(target);
-      if (!insideEvents && !insideLocation) {
-        setEventsOpen(false);
-        setLocationOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   return (
     <header className="bg-header text-white shadow-md sticky top-0 z-50">
@@ -45,44 +25,11 @@ export default function Header() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-8">
-            {navLinks.map((link) =>
-              link.hasDropdown ? (
-                <div
-                  key={link.to}
-                  className="relative"
-                  ref={link.to === '/events' ? eventsRef : link.to === '/location' ? locationRef : undefined}
-                >
-                  <button
-                    onClick={() => {
-                      if (link.to === '/events') setEventsOpen((o) => !o);
-                      else if (link.to === '/location') setLocationOpen((o) => !o);
-                    }}
-                    className="flex items-center gap-1 hover:opacity-90"
-                  >
-                    {link.label}
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                  {link.to === '/events' && eventsOpen && (
-                    <div className="absolute top-full left-0 mt-1 w-48 py-2 bg-white text-accent-primary rounded-lg shadow-lg">
-                      <Link to="/events" className="block px-4 py-2 hover:bg-body">All Events</Link>
-                      <Link to="/events/live" className="block px-4 py-2 hover:bg-body">Live</Link>
-                    </div>
-                  )}
-                  {link.to === '/location' && locationOpen && (
-                    <div className="absolute top-full left-0 mt-1 w-48 py-2 bg-white text-accent-primary rounded-lg shadow-lg">
-                      <Link to="/location" className="block px-4 py-2 hover:bg-body" onClick={() => setLocationOpen(false)}>Districts</Link>
-                      <Link to="/location" className="block px-4 py-2 hover:bg-body" onClick={() => setLocationOpen(false)}>Map View</Link>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <Link key={link.to} to={link.to} className="hover:opacity-90">
-                  {link.label}
-                </Link>
-              )
-            )}
+            {navLinks.map((link) => (
+              <Link key={link.to} to={link.to} className="hover:opacity-90">
+                {link.label}
+              </Link>
+            ))}
             {getAdminInfo() ? (
               <Link to="/admin/dashboard" className="hover:opacity-90 text-white/90">
                 System Admin

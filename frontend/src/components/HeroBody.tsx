@@ -40,7 +40,7 @@ export default function HeroBody() {
             Track density, predict chaos, and keep public spaces safe.
           </p>
           <Link
-            to="/dashboard"
+            to="/location"
             className="mt-6 sm:mt-8 inline-flex items-center justify-center px-6 sm:px-8 py-3 sm:py-4 rounded-full bg-white text-header font-semibold text-base sm:text-lg hover:bg-white/95 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all shadow-lg"
           >
             View Crowd Status
